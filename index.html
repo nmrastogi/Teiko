@@ -527,7 +527,6 @@ function renderTab2(samples) {
 // TAB 3 – Boxplots + Stats
 // ════════════════════════════════════════════════
 function renderTab3({ stats, boxplot }) {
-  // ── Boxplot helper ──
   function fiveNum(arr) {
     const sorted = [...arr].sort(d3.ascending);
     const q1  = d3.quantile(sorted, .25);
@@ -540,92 +539,155 @@ function renderTab3({ stats, boxplot }) {
   }
 
   const container = document.getElementById("t3-boxplots");
-
   const RESP_COLOR    = "#2196F3";
   const NONRESP_COLOR = "#F44336";
+
+  // viewBox dimensions — SVG scales to card width via CSS width="100%"
+  const VW = 260, VH = 340;
+  const margin = { top: 46, right: 18, bottom: 58, left: 54 };
+  const w = VW - margin.left - margin.right;
+  const h = VH - margin.top  - margin.bottom;
 
   stats.forEach(s => {
     const card = document.createElement("div");
     card.className = "chart-card";
-    card.style.padding = "14px 12px";
+    card.style.padding = "14px 10px 10px";
     container.appendChild(card);
 
-    const title = document.createElement("h3");
-    title.style.fontSize = ".88rem";
-    title.style.marginBottom = "6px";
-    title.textContent = s.label;
-    card.appendChild(title);
+    // Panel title as a DOM element above SVG
+    const titleEl = document.createElement("div");
+    titleEl.style.cssText = "font-size:.92rem;font-weight:700;color:#1a365d;margin-bottom:4px;text-align:center;letter-spacing:.2px";
+    titleEl.textContent = s.label;
+    card.appendChild(titleEl);
 
     const respData    = boxplot[s.population].yes;
     const nonrespData = boxplot[s.population].no;
 
-    const margin = { top: 28, right: 10, bottom: 36, left: 38 };
-    const W = 160, H = 220;
-    const w = W - margin.left - margin.right;
-    const h = H - margin.top  - margin.bottom;
-
     const allVals = [...respData, ...nonrespData];
     const yMin = d3.min(allVals), yMax = d3.max(allVals);
-    const yPad = (yMax - yMin) * .08;
-    const y = d3.scaleLinear().domain([yMin - yPad, yMax + yPad * 3]).range([h, 0]);
+    const yPad = (yMax - yMin) * .10;
+
+    // x scale — two bands for the two groups
+    const xGroups = ["Responder", "Non-Responder"];
+    const x = d3.scaleBand().domain(xGroups).range([0, w]).padding(0.38);
+    const bw = x.bandwidth();
+
+    // y scale with generous padding for bracket annotation
+    const y = d3.scaleLinear()
+      .domain([Math.max(0, yMin - yPad), yMax + yPad])
+      .range([h, 0])
+      .nice();
 
     const svg = d3.select(card).append("svg")
-      .attr("width", W).attr("height", H)
+      .attr("viewBox", `0 0 ${VW} ${VH}`)
+      .attr("width", "100%")
       .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
-    svg.append("g").call(
-      d3.axisLeft(y).ticks(5).tickFormat(d => d.toFixed(1))
-    ).call(g => g.select(".domain").remove());
+    // Y gridlines
+    svg.append("g")
+      .call(d3.axisLeft(y).ticks(5).tickSize(-w).tickFormat(""))
+      .call(g => {
+        g.select(".domain").remove();
+        g.selectAll(".tick line")
+          .attr("stroke", "#e2e8f0")
+          .attr("stroke-dasharray", "4,3");
+      });
 
+    // Y axis
+    svg.append("g")
+      .call(d3.axisLeft(y).ticks(5).tickFormat(d => d.toFixed(1)))
+      .call(g => g.select(".domain").attr("stroke", "#a0aec0"))
+      .call(g => g.selectAll(".tick line").attr("stroke", "#a0aec0"))
+      .call(g => g.selectAll(".tick text").attr("font-size", "10").attr("fill", "#4a5568"));
+
+    // Y axis title
+    svg.append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("x", -h / 2)
+      .attr("y", -46)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "11")
+      .attr("fill", "#4a5568")
+      .text("Relative Frequency (%)");
+
+    // X axis
+    svg.append("g")
+      .attr("transform", `translate(0,${h})`)
+      .call(d3.axisBottom(x).tickSize(5))
+      .call(g => g.select(".domain").attr("stroke", "#a0aec0"))
+      .call(g => g.selectAll(".tick line").attr("stroke", "#a0aec0"))
+      .call(g => g.selectAll(".tick text")
+        .attr("font-size", "10.5")
+        .attr("fill", "#4a5568")
+        .text(d => d === "Responder" ? "Responder" : "Non-Resp."));
+
+    // X axis title
+    svg.append("text")
+      .attr("x", w / 2)
+      .attr("y", h + 48)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "11")
+      .attr("fill", "#4a5568")
+      .text("Response Group");
+
+    // Draw boxes
     const groups = [
-      { data: respData,    color: RESP_COLOR,    label: "Resp",    x: w * .22 },
-      { data: nonrespData, color: NONRESP_COLOR,  label: "Non-R.", x: w * .68 },
+      { data: respData,    color: RESP_COLOR,    key: "Responder" },
+      { data: nonrespData, color: NONRESP_COLOR,  key: "Non-Responder" },
     ];
-    const bw = w * .28;
 
-    groups.forEach(({ data, color, label, x }) => {
+    groups.forEach(({ data, color, key }) => {
       const { q1, med, q3, lo, hi } = fiveNum(data);
+      const cx = x(key) + bw / 2;
+      const xl = x(key);
 
-      // Whisker lines
-      svg.append("line")
-        .attr("x1", x + bw/2).attr("x2", x + bw/2)
-        .attr("y1", y(lo)).attr("y2", y(q1))
-        .attr("stroke", "#718096").attr("stroke-width", 1.5);
-      svg.append("line")
-        .attr("x1", x + bw/2).attr("x2", x + bw/2)
-        .attr("y1", y(q3)).attr("y2", y(hi))
-        .attr("stroke", "#718096").attr("stroke-width", 1.5);
+      // Lower whisker
+      svg.append("line").attr("x1",cx).attr("x2",cx).attr("y1",y(lo)).attr("y2",y(q1))
+        .attr("stroke","#718096").attr("stroke-width",1.5);
+      // Upper whisker
+      svg.append("line").attr("x1",cx).attr("x2",cx).attr("y1",y(q3)).attr("y2",y(hi))
+        .attr("stroke","#718096").attr("stroke-width",1.5);
       // Whisker caps
-      [[lo, q1],[q3, hi]].forEach(([, cap]) => {
+      [lo, hi].forEach(cap => {
         svg.append("line")
-          .attr("x1", x + bw*.2).attr("x2", x + bw*.8)
+          .attr("x1", xl + bw*.18).attr("x2", xl + bw*.82)
           .attr("y1", y(cap)).attr("y2", y(cap))
-          .attr("stroke", "#718096").attr("stroke-width", 1.5);
+          .attr("stroke","#718096").attr("stroke-width",1.5);
       });
       // IQR box
       svg.append("rect")
-        .attr("x", x).attr("y", y(q3))
+        .attr("x", xl).attr("y", y(q3))
         .attr("width", bw).attr("height", y(q1) - y(q3))
-        .attr("fill", color).attr("fill-opacity", .65)
-        .attr("stroke", color).attr("stroke-width", 1.5).attr("rx", 3);
+        .attr("fill", color).attr("fill-opacity", .70)
+        .attr("stroke", color).attr("stroke-width", 1.8).attr("rx", 3);
       // Median line
       svg.append("line")
-        .attr("x1", x).attr("x2", x + bw)
+        .attr("x1", xl).attr("x2", xl + bw)
         .attr("y1", y(med)).attr("y2", y(med))
         .attr("stroke", "#1a202c").attr("stroke-width", 2.5);
-      // X-axis label
-      svg.append("text")
-        .attr("x", x + bw/2).attr("y", h + 16)
-        .attr("text-anchor","middle").attr("font-size","10").attr("fill","#4a5568")
-        .text(label);
     });
 
-    // p-value annotation
-    const pLabel = s.p_value_fdr < 0.001 ? "***" : s.p_value_fdr < 0.01 ? "**" : s.p_value_fdr < 0.05 ? "*" : "ns";
+    // Significance bracket between the two boxes
+    const pStar = s.p_value_fdr < 0.001 ? "***" : s.p_value_fdr < 0.01 ? "**" : s.p_value_fdr < 0.05 ? "*" : "ns";
+    const bktColor = s.significant_fdr ? "#2b6cb0" : "#a0aec0";
+    const bktY = -30;
+    const bx1 = x("Responder")    + bw / 2;
+    const bx2 = x("Non-Responder") + bw / 2;
+
+    // Horizontal bracket line
+    svg.append("line").attr("x1",bx1).attr("x2",bx2).attr("y1",bktY).attr("y2",bktY)
+      .attr("stroke", bktColor).attr("stroke-width", 1.3);
+    // Tick drops
+    [bx1, bx2].forEach(xp =>
+      svg.append("line").attr("x1",xp).attr("x2",xp).attr("y1",bktY).attr("y2",bktY+5)
+        .attr("stroke", bktColor).attr("stroke-width", 1.3)
+    );
+    // p-value text above bracket
     svg.append("text")
-      .attr("x", w/2).attr("y", -12)
-      .attr("text-anchor","middle").attr("font-size","9").attr("fill","#4a5568")
-      .text(`p=${s.p_value.toFixed(4)} · FDR ${s.p_value_fdr.toFixed(4)} ${pLabel}`);
+      .attr("x", (bx1 + bx2) / 2).attr("y", bktY - 5)
+      .attr("text-anchor","middle").attr("font-size","9.5").attr("fill", bktColor)
+      .attr("font-weight", s.significant_fdr ? "700" : "400")
+      .text(`p=${s.p_value.toFixed(4)}  FDR=${s.p_value_fdr.toFixed(4)}  ${pStar}`);
   });
 
   // ── Callout ──

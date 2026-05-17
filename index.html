@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Teiko Immune Cell Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<style>
+  /* ── Reset & base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; background: #f0f4f8; color: #1a202c; }
+
+  /* ── Header ── */
+  header {
+    background: linear-gradient(135deg, #1565c0 0%, #0d47a1 100%);
+    color: #fff;
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.25);
+  }
+  header h1 { font-size: 1.45rem; font-weight: 700; letter-spacing: .3px; }
+  header p  { font-size: .85rem; opacity: .85; margin-top: 2px; }
+
+  /* ── Tabs ── */
+  .tab-bar {
+    display: flex;
+    gap: 4px;
+    padding: 14px 32px 0;
+    background: #e2e8f0;
+    border-bottom: 2px solid #cbd5e0;
+  }
+  .tab-btn {
+    padding: 9px 22px;
+    border: none;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    font-size: .9rem;
+    font-weight: 600;
+    background: #cbd5e0;
+    color: #4a5568;
+    transition: background .15s, color .15s;
+  }
+  .tab-btn:hover  { background: #b2bec8; }
+  .tab-btn.active { background: #fff; color: #1565c0; border-bottom: 2px solid #fff; margin-bottom: -2px; }
+
+  /* ── Tab panels ── */
+  .tab-panel { display: none; padding: 28px 32px; }
+  .tab-panel.active { display: block; }
+
+  /* ── Section titles ── */
+  h2 { font-size: 1.2rem; color: #1a365d; margin-bottom: 4px; }
+  .subtitle { font-size: .85rem; color: #718096; margin-bottom: 18px; }
+
+  /* ── Filter row ── */
+  .filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: flex-end;
+    margin-bottom: 16px;
+  }
+  .filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .filter-group label { font-size: .78rem; font-weight: 600; color: #4a5568; text-transform: uppercase; letter-spacing: .5px; }
+  select {
+    padding: 7px 10px;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: .88rem;
+    background: #fff;
+    color: #2d3748;
+    cursor: pointer;
+    min-width: 150px;
+  }
+  select:focus { outline: 2px solid #3182ce; }
+
+  /* ── Row count badge ── */
+  .row-count {
+    font-size: .82rem;
+    color: #4a5568;
+    margin-bottom: 10px;
+    padding: 6px 12px;
+    background: #ebf8ff;
+    border-radius: 6px;
+    border: 1px solid #bee3f8;
+    display: inline-block;
+  }
+
+  /* ── Tables ── */
+  .table-wrap {
+    overflow-x: auto;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+    background: #fff;
+    margin-bottom: 24px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  thead { position: sticky; top: 0; z-index: 1; }
+  thead th {
+    padding: 10px 14px;
+    text-align: left;
+    background: #2b6cb0;
+    color: #fff;
+    font-weight: 600;
+    font-size: .8rem;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    white-space: nowrap;
+  }
+  tbody tr:nth-child(even) { background: #f7fafc; }
+  tbody tr:hover { background: #ebf8ff; }
+  tbody td { padding: 8px 14px; border-bottom: 1px solid #e2e8f0; }
+
+  /* ── Pagination ── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 24px;
+    font-size: .88rem;
+    color: #4a5568;
+  }
+  .pagination button {
+    padding: 5px 14px;
+    border: 1px solid #cbd5e0;
+    border-radius: 5px;
+    background: #fff;
+    cursor: pointer;
+    font-size: .88rem;
+    color: #2d3748;
+  }
+  .pagination button:hover:not(:disabled) { background: #ebf8ff; border-color: #90cdf4; }
+  .pagination button:disabled { opacity: .45; cursor: not-allowed; }
+
+  /* ── SVG charts ── */
+  .chart-card {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+    padding: 20px 24px;
+    margin-bottom: 24px;
+  }
+  .chart-card h3 { font-size: 1rem; color: #2d3748; margin-bottom: 14px; }
+  svg { display: block; }
+
+  /* ── Boxplot grid ── */
+  .boxplot-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  @media (max-width: 900px) { .boxplot-grid { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ── Stats table significance highlight ── */
+  tr.sig-yes { background: #ebf8ff !important; }
+  tr.sig-yes td:last-child { color: #2b6cb0; font-weight: 700; }
+
+  /* ── Part 4 KPI cards ── */
+  .kpi-row { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+  .kpi-card {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+    padding: 20px 28px;
+    text-align: center;
+    flex: 1;
+    min-width: 140px;
+  }
+  .kpi-card .kpi-label { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: #718096; margin-bottom: 6px; }
+  .kpi-card .kpi-value { font-size: 2rem; font-weight: 700; color: #1a365d; }
+
+  /* ── Charts row (Part 4) ── */
+  .charts-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .charts-row { grid-template-columns: 1fr; } }
+
+  /* ── Highlight metric (avg B cell) ── */
+  .highlight-card {
+    background: linear-gradient(135deg, #1565c0 0%, #0d47a1 100%);
+    color: #fff;
+    border-radius: 12px;
+    padding: 24px 32px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    max-width: 520px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 8px rgba(21,101,192,.35);
+  }
+  .highlight-card .hl-label { font-size: .85rem; opacity: .9; }
+  .highlight-card .hl-value { font-size: 2.4rem; font-weight: 800; margin-top: 4px; }
+  .highlight-card .hl-sub   { font-size: .78rem; opacity: .75; margin-top: 2px; }
+
+  /* ── Legend ── */
+  .legend { display: flex; gap: 18px; align-items: center; font-size: .82rem; color: #4a5568; margin-bottom: 10px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; margin-right: 4px; vertical-align: middle; }
+
+  /* ── Callout ── */
+  .callout {
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: .88rem;
+    margin-bottom: 20px;
+  }
+  .callout.info { background: #ebf8ff; border-left: 4px solid #3182ce; color: #2c5282; }
+  .callout.success { background: #f0fff4; border-left: 4px solid #38a169; color: #22543d; }
+
+  /* ── Loading / error ── */
+  #loading { text-align: center; padding: 80px; font-size: 1.1rem; color: #718096; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🧬 Teiko Immune Cell Dashboard</h1>
+    <p>Clinical-trial analysis — how <em>miraclib</em> affects immune cell populations · Loblaw Bio</p>
+  </div>
+</header>
+
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="tab2">📊 Part 2 – Data Overview</button>
+  <button class="tab-btn"        data-tab="tab3">📈 Part 3 – Statistical Analysis</button>
+  <button class="tab-btn"        data-tab="tab4">🔬 Part 4 – Baseline Subset</button>
+</div>
+
+<div id="loading">Loading data…</div>
+
+<!-- ═══════════════════════ TAB 2 ═══════════════════════ -->
+<div id="tab2" class="tab-panel">
+  <h2>Cell Population Frequencies</h2>
+  <p class="subtitle">Relative frequency of each immune cell population per sample. Use filters to explore subsets.</p>
+
+  <div class="filter-row">
+    <div class="filter-group"><label>Condition</label><select id="f-condition"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Treatment</label><select id="f-treatment"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Sample Type</label><select id="f-sampletype"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Population</label><select id="f-population"><option value="">All</option></select></div>
+  </div>
+
+  <div id="t2-count" class="row-count"></div>
+
+  <div class="table-wrap">
+    <table id="t2-table">
+      <thead><tr>
+        <th>Sample</th><th>Population</th><th>Count</th><th>Total Count</th><th>Frequency (%)</th>
+      </tr></thead>
+      <tbody id="t2-tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    <button id="t2-prev">◀ Prev</button>
+    <span id="t2-page-info"></span>
+    <button id="t2-next">Next ▶</button>
+  </div>
+
+  <div class="chart-card">
+    <h3>Average Relative Frequency by Population <span id="t2-chart-subtitle" style="font-weight:400;color:#718096;font-size:.88rem"></span></h3>
+    <div id="t2-barchart"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ TAB 3 ═══════════════════════ -->
+<div id="tab3" class="tab-panel">
+  <h2>Responders vs Non-Responders</h2>
+  <p class="subtitle">Melanoma · Miraclib · PBMC &nbsp;|&nbsp; Mann-Whitney U test, Benjamini-Hochberg FDR correction</p>
+
+  <div class="legend">
+    <span><span class="legend-swatch" style="background:#2196F3"></span>Responder</span>
+    <span><span class="legend-swatch" style="background:#F44336"></span>Non-Responder</span>
+  </div>
+
+  <div class="boxplot-grid" id="t3-boxplots"></div>
+
+  <div id="t3-callout"></div>
+
+  <div class="chart-card">
+    <h3>Statistical Results (Mann-Whitney U + BH-FDR)</h3>
+    <div class="table-wrap" style="margin-bottom:0;max-height:none;">
+      <table>
+        <thead><tr>
+          <th>Population</th>
+          <th>N Resp.</th><th>N Non-Resp.</th>
+          <th>Median Resp (%)</th><th>Median Non-Resp (%)</th>
+          <th>p-value</th><th>p-value (FDR)</th><th>Significant*</th>
+        </tr></thead>
+        <tbody id="t3-stats-tbody"></tbody>
+      </table>
+    </div>
+    <p style="font-size:.78rem;color:#718096;margin-top:8px;">* Significant at FDR-adjusted p &lt; 0.05 (Benjamini-Hochberg method)</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════ TAB 4 ═══════════════════════ -->
+<div id="tab4" class="tab-panel">
+  <h2>Baseline Subset Analysis</h2>
+  <p class="subtitle">Melanoma · PBMC · time_from_treatment_start = 0 · Miraclib</p>
+
+  <div class="kpi-row" id="t4-kpis"></div>
+
+  <div class="charts-row">
+    <div class="chart-card" style="margin-bottom:0"><h3>Samples per Project</h3><div id="t4-proj-chart"></div></div>
+    <div class="chart-card" style="margin-bottom:0"><h3>Subjects by Response</h3><div id="t4-resp-chart"></div></div>
+    <div class="chart-card" style="margin-bottom:0"><h3>Subjects by Sex</h3><div id="t4-sex-chart"></div></div>
+  </div>
+
+  <br/>
+  <h3 style="font-size:1rem;color:#2d3748;margin-bottom:12px;">Average B-Cell Count — Melanoma Male Responders at Time = 0</h3>
+  <div class="highlight-card">
+    <div>
+      <div class="hl-label">Avg B Cells (Melanoma · Male · Responder · t = 0)</div>
+      <div class="hl-value" id="t4-avg-b"></div>
+      <div class="hl-sub" id="t4-avg-b-n"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════
+// Utilities
+// ════════════════════════════════════════════════
+const POP_LABELS = {
+  b_cell:      "B Cell",
+  cd8_t_cell:  "CD8 T Cell",
+  cd4_t_cell:  "CD4 T Cell",
+  nk_cell:     "NK Cell",
+  monocyte:    "Monocyte",
+};
+const POPULATIONS = ["b_cell","cd8_t_cell","cd4_t_cell","nk_cell","monocyte"];
+
+function unique(arr) { return [...new Set(arr)].sort(); }
+
+// ════════════════════════════════════════════════
+// Tab switching
+// ════════════════════════════════════════════════
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(btn.dataset.tab).classList.add("active");
+  });
+});
+
+// ════════════════════════════════════════════════
+// Load all data then render
+// ════════════════════════════════════════════════
+Promise.all([
+  d3.json("outputs/data_part2.json"),
+  d3.json("outputs/data_part3.json"),
+  d3.json("outputs/data_part4.json"),
+]).then(([p2raw, p3raw, p4raw]) => {
+  document.getElementById("loading").style.display = "none";
+  document.querySelectorAll(".tab-panel").forEach(p => {
+    if (p.id === "tab2") p.classList.add("active");
+  });
+
+  renderTab2(p2raw.samples);
+  renderTab3(p3raw);
+  renderTab4(p4raw);
+}).catch(err => {
+  document.getElementById("loading").innerHTML =
+    `<span style="color:#e53e3e">Error loading data: ${err.message}<br>
+    Run <code>make pipeline</code> first, then <code>make dashboard</code>.</span>`;
+});
+
+
+// ════════════════════════════════════════════════
+// TAB 2 – Data Overview
+// ════════════════════════════════════════════════
+function renderTab2(samples) {
+  // Populate filter dropdowns
+  const conditions   = unique(samples.map(s => s.condition));
+  const treatments   = unique(samples.map(s => s.treatment));
+  const sampleTypes  = unique(samples.map(s => s.sample_type));
+
+  function populate(id, values) {
+    const sel = document.getElementById(id);
+    values.forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v; opt.textContent = v;
+      sel.appendChild(opt);
+    });
+  }
+  populate("f-condition",  conditions);
+  populate("f-treatment",  treatments);
+  populate("f-sampletype", sampleTypes);
+  POPULATIONS.forEach(p => {
+    const sel = document.getElementById("f-population");
+    const opt = document.createElement("option");
+    opt.value = p; opt.textContent = POP_LABELS[p];
+    sel.appendChild(opt);
+  });
+
+  // State
+  let currentPage = 0;
+  const PAGE_SIZE = 100;
+  let filteredRows = [];
+
+  function getRows() {
+    const fCond = document.getElementById("f-condition").value;
+    const fTreat = document.getElementById("f-treatment").value;
+    const fType = document.getElementById("f-sampletype").value;
+    const fPop = document.getElementById("f-population").value;
+
+    const rows = [];
+    samples.forEach(s => {
+      if (fCond  && s.condition   !== fCond)  return;
+      if (fTreat && s.treatment   !== fTreat) return;
+      if (fType  && s.sample_type !== fType)  return;
+      const pops = fPop ? [fPop] : POPULATIONS;
+      pops.forEach(pop => {
+        rows.push({
+          sample:      s.sample,
+          population:  pop,
+          count:       s.populations[pop].count,
+          total_count: s.total_count,
+          percentage:  s.populations[pop].percentage,
+        });
+      });
+    });
+    return rows;
+  }
+
+  function renderTable() {
+    filteredRows = getRows();
+    const totalRows    = filteredRows.length;
+    const totalSamples = new Set(filteredRows.map(r => r.sample)).size;
+    const totalPages   = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+    if (currentPage >= totalPages) currentPage = 0;
+
+    document.getElementById("t2-count").textContent =
+      `Showing ${Math.min(PAGE_SIZE, totalRows - currentPage * PAGE_SIZE).toLocaleString()} of ${totalRows.toLocaleString()} rows across ${totalSamples.toLocaleString()} samples`;
+
+    const slice = filteredRows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+    const tbody = document.getElementById("t2-tbody");
+    tbody.innerHTML = "";
+    slice.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${r.sample}</td><td>${POP_LABELS[r.population]}</td><td>${r.count.toLocaleString()}</td><td>${r.total_count.toLocaleString()}</td><td>${r.percentage.toFixed(2)}%</td>`;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById("t2-page-info").textContent =
+      `Page ${currentPage + 1} of ${totalPages}`;
+    document.getElementById("t2-prev").disabled = currentPage === 0;
+    document.getElementById("t2-next").disabled = currentPage >= totalPages - 1;
+
+    renderBarChart(filteredRows);
+  }
+
+  ["f-condition","f-treatment","f-sampletype","f-population"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => { currentPage = 0; renderTable(); });
+  });
+  document.getElementById("t2-prev").addEventListener("click", () => { currentPage--; renderTable(); });
+  document.getElementById("t2-next").addEventListener("click", () => { currentPage++; renderTable(); });
+
+  function renderBarChart(rows) {
+    const container = document.getElementById("t2-barchart");
+    container.innerHTML = "";
+
+    // Average pct per population
+    const totals = {}, counts = {};
+    POPULATIONS.forEach(p => { totals[p] = 0; counts[p] = 0; });
+    rows.forEach(r => { totals[r.population] += r.percentage; counts[r.population]++; });
+    const data = POPULATIONS.map(p => ({
+      pop:   p,
+      label: POP_LABELS[p],
+      avg:   counts[p] > 0 ? totals[p] / counts[p] : 0,
+    }));
+
+    const margin = { top: 10, right: 20, bottom: 50, left: 52 };
+    const width  = Math.min(700, container.clientWidth || 680) - margin.left - margin.right;
+    const height = 240 - margin.top - margin.bottom;
+
+    const svg = d3.select(container).append("svg")
+      .attr("width",  width  + margin.left + margin.right)
+      .attr("height", height + margin.top  + margin.bottom)
+      .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+    const x = d3.scaleBand().domain(data.map(d => d.label)).range([0, width]).padding(.35);
+    const y = d3.scaleLinear().domain([0, d3.max(data, d => d.avg) * 1.15]).range([height, 0]);
+    const color = d3.scaleOrdinal(d3.schemeSet2).domain(data.map(d => d.label));
+
+    svg.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
+    svg.append("g").call(d3.axisLeft(y).ticks(5).tickFormat(d => d.toFixed(1) + "%"));
+
+    svg.append("text").attr("x", -height/2).attr("y", -42).attr("transform","rotate(-90)")
+      .attr("text-anchor","middle").attr("font-size","12").attr("fill","#4a5568").text("Avg Frequency (%)");
+
+    svg.selectAll(".bar").data(data).join("rect")
+      .attr("class","bar")
+      .attr("x", d => x(d.label))
+      .attr("y", d => y(d.avg))
+      .attr("width", x.bandwidth())
+      .attr("height", d => height - y(d.avg))
+      .attr("fill", d => color(d.label))
+      .attr("rx", 4);
+
+    svg.selectAll(".bar-label").data(data).join("text")
+      .attr("class","bar-label")
+      .attr("x", d => x(d.label) + x.bandwidth() / 2)
+      .attr("y", d => y(d.avg) - 4)
+      .attr("text-anchor","middle")
+      .attr("font-size","11")
+      .attr("fill","#2d3748")
+      .text(d => d.avg.toFixed(1) + "%");
+
+    // subtitle
+    const fCond  = document.getElementById("f-condition").value  || "All";
+    const fTreat = document.getElementById("f-treatment").value  || "All";
+    const fType  = document.getElementById("f-sampletype").value || "All";
+    const fPop   = document.getElementById("f-population").value;
+    document.getElementById("t2-chart-subtitle").textContent =
+      `— ${fCond} · ${fTreat} · ${fType}${fPop ? " · "+POP_LABELS[fPop] : ""}`;
+  }
+
+  renderTable();
+}
+
+
+// ════════════════════════════════════════════════
+// TAB 3 – Boxplots + Stats
+// ════════════════════════════════════════════════
+function renderTab3({ stats, boxplot }) {
+  // ── Boxplot helper ──
+  function fiveNum(arr) {
+    const sorted = [...arr].sort(d3.ascending);
+    const q1  = d3.quantile(sorted, .25);
+    const med = d3.quantile(sorted, .50);
+    const q3  = d3.quantile(sorted, .75);
+    const iqr = q3 - q1;
+    const lo  = d3.min(sorted.filter(v => v >= q1 - 1.5 * iqr));
+    const hi  = d3.max(sorted.filter(v => v <= q3 + 1.5 * iqr));
+    return { q1, med, q3, lo, hi };
+  }
+
+  const container = document.getElementById("t3-boxplots");
+
+  const RESP_COLOR    = "#2196F3";
+  const NONRESP_COLOR = "#F44336";
+
+  stats.forEach(s => {
+    const card = document.createElement("div");
+    card.className = "chart-card";
+    card.style.padding = "14px 12px";
+    container.appendChild(card);
+
+    const title = document.createElement("h3");
+    title.style.fontSize = ".88rem";
+    title.style.marginBottom = "6px";
+    title.textContent = s.label;
+    card.appendChild(title);
+
+    const respData    = boxplot[s.population].yes;
+    const nonrespData = boxplot[s.population].no;
+
+    const margin = { top: 28, right: 10, bottom: 36, left: 38 };
+    const W = 160, H = 220;
+    const w = W - margin.left - margin.right;
+    const h = H - margin.top  - margin.bottom;
+
+    const allVals = [...respData, ...nonrespData];
+    const yMin = d3.min(allVals), yMax = d3.max(allVals);
+    const yPad = (yMax - yMin) * .08;
+    const y = d3.scaleLinear().domain([yMin - yPad, yMax + yPad * 3]).range([h, 0]);
+
+    const svg = d3.select(card).append("svg")
+      .attr("width", W).attr("height", H)
+      .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+    svg.append("g").call(
+      d3.axisLeft(y).ticks(5).tickFormat(d => d.toFixed(1))
+    ).call(g => g.select(".domain").remove());
+
+    const groups = [
+      { data: respData,    color: RESP_COLOR,    label: "Resp",    x: w * .22 },
+      { data: nonrespData, color: NONRESP_COLOR,  label: "Non-R.", x: w * .68 },
+    ];
+    const bw = w * .28;
+
+    groups.forEach(({ data, color, label, x }) => {
+      const { q1, med, q3, lo, hi } = fiveNum(data);
+
+      // Whisker lines
+      svg.append("line")
+        .attr("x1", x + bw/2).attr("x2", x + bw/2)
+        .attr("y1", y(lo)).attr("y2", y(q1))
+        .attr("stroke", "#718096").attr("stroke-width", 1.5);
+      svg.append("line")
+        .attr("x1", x + bw/2).attr("x2", x + bw/2)
+        .attr("y1", y(q3)).attr("y2", y(hi))
+        .attr("stroke", "#718096").attr("stroke-width", 1.5);
+      // Whisker caps
+      [[lo, q1],[q3, hi]].forEach(([, cap]) => {
+        svg.append("line")
+          .attr("x1", x + bw*.2).attr("x2", x + bw*.8)
+          .attr("y1", y(cap)).attr("y2", y(cap))
+          .attr("stroke", "#718096").attr("stroke-width", 1.5);
+      });
+      // IQR box
+      svg.append("rect")
+        .attr("x", x).attr("y", y(q3))
+        .attr("width", bw).attr("height", y(q1) - y(q3))
+        .attr("fill", color).attr("fill-opacity", .65)
+        .attr("stroke", color).attr("stroke-width", 1.5).attr("rx", 3);
+      // Median line
+      svg.append("line")
+        .attr("x1", x).attr("x2", x + bw)
+        .attr("y1", y(med)).attr("y2", y(med))
+        .attr("stroke", "#1a202c").attr("stroke-width", 2.5);
+      // X-axis label
+      svg.append("text")
+        .attr("x", x + bw/2).attr("y", h + 16)
+        .attr("text-anchor","middle").attr("font-size","10").attr("fill","#4a5568")
+        .text(label);
+    });
+
+    // p-value annotation
+    const pLabel = s.p_value_fdr < 0.001 ? "***" : s.p_value_fdr < 0.01 ? "**" : s.p_value_fdr < 0.05 ? "*" : "ns";
+    svg.append("text")
+      .attr("x", w/2).attr("y", -12)
+      .attr("text-anchor","middle").attr("font-size","9").attr("fill","#4a5568")
+      .text(`p=${s.p_value.toFixed(4)} · FDR ${s.p_value_fdr.toFixed(4)} ${pLabel}`);
+  });
+
+  // ── Callout ──
+  const sigPops = stats.filter(s => s.significant_fdr).map(s => s.label);
+  const callout = document.getElementById("t3-callout");
+  callout.className = sigPops.length ? "callout success" : "callout info";
+  callout.innerHTML = sigPops.length
+    ? `<strong>Significant populations (FDR &lt; 0.05):</strong> ${sigPops.join(", ")}`
+    : "No cell populations reached FDR-corrected significance at α = 0.05. "
+      + "CD4 T Cell shows the strongest trend (raw p = 0.0133, FDR p = 0.0667).";
+
+  // ── Stats table ──
+  const tbody = document.getElementById("t3-stats-tbody");
+  stats.forEach(s => {
+    const tr = document.createElement("tr");
+    if (s.significant_fdr) tr.className = "sig-yes";
+    tr.innerHTML = `
+      <td>${s.label}</td>
+      <td>${s.n_responders}</td>
+      <td>${s.n_non_responders}</td>
+      <td>${s.median_resp.toFixed(3)}%</td>
+      <td>${s.median_nonresp.toFixed(3)}%</td>
+      <td>${s.p_value.toFixed(6)}</td>
+      <td>${s.p_value_fdr.toFixed(6)}</td>
+      <td>${s.significant_fdr ? "✅ Yes" : "❌ No"}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+
+// ════════════════════════════════════════════════
+// TAB 4 – Baseline Subset
+// ════════════════════════════════════════════════
+function renderTab4(d) {
+  // KPI cards
+  const kpiData = [
+    { label: "Total Samples",  value: d.total_samples.toLocaleString() },
+    { label: "Total Subjects", value: d.total_subjects.toLocaleString() },
+    { label: "Projects",       value: Object.keys(d.samples_per_project).length },
+  ];
+  const kpiRow = document.getElementById("t4-kpis");
+  kpiData.forEach(k => {
+    kpiRow.innerHTML += `<div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value">${k.value}</div></div>`;
+  });
+
+  // Avg B-cell highlight
+  document.getElementById("t4-avg-b").textContent = d.avg_b_cell_male_resp.toLocaleString("en", {minimumFractionDigits:2, maximumFractionDigits:2});
+  document.getElementById("t4-avg-b-n").textContent = `n = ${d.n_male_resp} subjects`;
+
+  // ── Donut: samples per project ──
+  function renderDonut(containerId, dataObj, colorScale) {
+    const el = document.getElementById(containerId);
+    const W = 200, H = 200, R = 80;
+    const data = Object.entries(dataObj).map(([k, v]) => ({ key: k, value: v }));
+    const pie  = d3.pie().value(d => d.value).sort(null);
+    const arc  = d3.arc().innerRadius(R * .55).outerRadius(R);
+    const color = d3.scaleOrdinal(colorScale).domain(data.map(d => d.key));
+
+    const svg = d3.select(el).append("svg").attr("width", W).attr("height", H)
+      .append("g").attr("transform", `translate(${W/2},${H/2})`);
+
+    svg.selectAll("path").data(pie(data)).join("path")
+      .attr("d", arc)
+      .attr("fill", d => color(d.data.key))
+      .attr("stroke", "#fff").attr("stroke-width", 2);
+
+    svg.selectAll("text.slice-label").data(pie(data)).join("text")
+      .attr("class","slice-label")
+      .attr("transform", d => `translate(${arc.centroid(d)})`)
+      .attr("text-anchor","middle").attr("font-size","11").attr("fill","#fff").attr("font-weight","600")
+      .text(d => d.data.value);
+
+    // Legend below
+    const legend = d3.select(el).append("div")
+      .style("display","flex").style("justify-content","center").style("gap","14px").style("font-size",".78rem");
+    data.forEach(item => {
+      legend.append("div").html(
+        `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color(item.key)};margin-right:4px;vertical-align:middle"></span>${item.key}: ${item.value}`
+      );
+    });
+  }
+
+  renderDonut("t4-proj-chart", d.samples_per_project, d3.schemeSet2);
+
+  // ── Bar charts ──
+  function renderBar(containerId, dataObj, labelMap, colors) {
+    const el = document.getElementById(containerId);
+    const data = Object.entries(dataObj).map(([k, v]) => ({ key: labelMap[k] || k, raw: k, value: v }));
+    const margin = { top: 10, right: 10, bottom: 36, left: 46 };
+    const W = 200, H = 200;
+    const w = W - margin.left - margin.right;
+    const h = H - margin.top  - margin.bottom;
+
+    const x = d3.scaleBand().domain(data.map(d => d.key)).range([0, w]).padding(.35);
+    const y = d3.scaleLinear().domain([0, d3.max(data, d => d.value) * 1.2]).range([h, 0]);
+    const color = d3.scaleOrdinal(colors).domain(data.map(d => d.raw));
+
+    const svg = d3.select(el).append("svg").attr("width", W).attr("height", H)
+      .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+    svg.append("g").attr("transform", `translate(0,${h})`).call(d3.axisBottom(x));
+    svg.append("g").call(d3.axisLeft(y).ticks(4));
+
+    svg.selectAll(".bar").data(data).join("rect")
+      .attr("class","bar")
+      .attr("x", d => x(d.key)).attr("y", d => y(d.value))
+      .attr("width", x.bandwidth()).attr("height", d => h - y(d.value))
+      .attr("fill", d => color(d.raw)).attr("rx", 4);
+
+    svg.selectAll(".lbl").data(data).join("text")
+      .attr("class","lbl")
+      .attr("x", d => x(d.key) + x.bandwidth()/2).attr("y", d => y(d.value) - 4)
+      .attr("text-anchor","middle").attr("font-size","11").attr("fill","#2d3748")
+      .text(d => d.value);
+  }
+
+  renderBar("t4-resp-chart",
+    d.subjects_by_response,
+    { yes: "Responder", no: "Non-Resp." },
+    ["#2196F3","#F44336"]
+  );
+
+  renderBar("t4-sex-chart",
+    d.subjects_by_sex,
+    { M: "Male", F: "Female" },
+    ["#1565C0","#AD1457"]
+  );
+}
+</script>
+</body>
+</html>

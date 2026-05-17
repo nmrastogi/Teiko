@@ -331,7 +331,7 @@ def export_json(conn: sqlite3.Connection) -> None:
             "condition":    row["condition"],
             "sex":          row["sex"],
             "treatment":    row["treatment"],
-            "response":     row["response"] if row["response"] else None,
+            "response":     None if pd.isna(row["response"]) else row["response"],
             "sample_type":  row["sample_type"],
             "time":         int(row["time"]),
             "total_count":  int(row["total_count"]),

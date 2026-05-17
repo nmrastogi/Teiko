@@ -157,7 +157,4 @@ Five tests are run simultaneously (one per population), so **Benjamini-Hochberg 
 
 Run `make dashboard` and open **http://localhost:8080/index.html** in your browser.
 
-To share publicly, host `index.html` and the `outputs/` directory on any static file host (GitHub Pages, Netlify, Vercel, etc.):
-1. Push this repository to GitHub.
-2. Enable GitHub Pages on the `main` branch (root directory).
-3. The public URL will be `https://<username>.github.io/<repo>/index.html`.
+**Live dashboard (GitHub Pages):** [https://nmrastogi.github.io/Teiko/](https://nmrastogi.github.io/Teiko/)

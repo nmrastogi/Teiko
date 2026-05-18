@@ -78,8 +78,13 @@ def build_summary_table(conn: sqlite3.Connection) -> pd.DataFrame:
 # Part 3 – statistical comparison: responders vs non-responders
 # ---------------------------------------------------------------------------
 
-def load_melanoma_miraclib_pbmc(conn: sqlite3.Connection) -> pd.DataFrame:
-    """Return percentage data for melanoma / miraclib / PBMC samples only."""
+def load_melanoma_miraclib_pbmc(
+    conn: sqlite3.Connection,
+    condition: str = "melanoma",
+    treatment: str = "miraclib",
+    sample_type: str = "PBMC",
+) -> pd.DataFrame:
+    """Return percentage data for the requested condition / treatment / sample_type subset."""
     query = """
         SELECT
             s.sample_id,
@@ -88,15 +93,15 @@ def load_melanoma_miraclib_pbmc(conn: sqlite3.Connection) -> pd.DataFrame:
         FROM samples s
         JOIN subjects sub ON sub.subject_id = s.subject_id
         JOIN cell_counts cc ON cc.sample_id = s.sample_id
-        WHERE sub.condition    = 'melanoma'
-          AND s.treatment      = 'miraclib'
-          AND s.sample_type    = 'PBMC'
+        WHERE sub.condition    = ?
+          AND s.treatment      = ?
+          AND s.sample_type    = ?
           AND s.response       IS NOT NULL
           AND s.response       != ''
         ORDER BY s.sample_id
     """
     try:
-        df = pd.read_sql_query(query, conn)
+        df = pd.read_sql_query(query, conn, params=(condition, treatment, sample_type))
     except sqlite3.DatabaseError as e:
         log.error("Query failed in load_melanoma_miraclib_pbmc: %s", e)
         raise

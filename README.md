@@ -85,10 +85,12 @@ subjects
 samples
   ├── sample_id                   TEXT  PK
   ├── subject_id                  TEXT  FK → subjects
-  ├── treatment                   TEXT
+  ├── treatment                   TEXT          (miraclib / phauximab / none)
   ├── response                    TEXT
-  ├── sample_type                 TEXT  (PBMC / WB)
+  ├── sample_type                 TEXT          (PBMC / WB)
   └── time_from_treatment_start   INTEGER
+
+> **Note on `treatment = 'none'`:** the value `none` indicates the patient received no active drug (i.e. placebo / control group). It is **not** a missing value. Samples with `treatment = 'none'` are valid observations and are intentionally included in the dataset.
 
 cell_counts
   ├── sample_id   TEXT  PK / FK → samples

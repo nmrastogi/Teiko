@@ -272,7 +272,15 @@
 <!-- ═══════════════════════ TAB 3 ═══════════════════════ -->
 <div id="tab3" class="tab-panel">
   <h2>Responders vs Non-Responders</h2>
-  <p class="subtitle">Melanoma · Miraclib · PBMC &nbsp;|&nbsp; Mann-Whitney U test, two-sided, α = 0.05</p>
+  <p class="subtitle">Mann-Whitney U test, two-sided, α = 0.05</p>
+
+  <div class="filter-row">
+    <div class="filter-group"><label>Condition</label><select id="t3-f-condition"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Treatment</label><select id="t3-f-treatment"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Sample Type</label><select id="t3-f-sampletype"><option value="">All</option></select></div>
+  </div>
+
+  <p id="t3-subtitle" class="subtitle" style="font-weight:600;color:#2b6cb0;margin-top:-6px;"></p>
 
   <div class="legend">
     <span><span class="legend-swatch" style="background:#2196F3"></span>Responder</span>
@@ -375,7 +383,7 @@ Promise.all([
   });
 
   initTab2(p2opts);
-  renderTab3(p3raw);
+  initTab3(p2opts, p3raw);
   initTab4(p4opts, p4raw);
 }).catch(err => {
   document.getElementById("loading").innerHTML =
@@ -539,9 +547,69 @@ function initTab2(opts) {
 
 
 // ════════════════════════════════════════════════
-// TAB 3 – Boxplots + Stats
+// TAB 3 – Boxplots + Stats (API-based filtering)
 // ════════════════════════════════════════════════
-function renderTab3({ stats, boxplot }) {
+function initTab3(opts, initialData) {
+  function populateSel(id, values) {
+    const sel = document.getElementById(id);
+    values.forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v; opt.textContent = v;
+      sel.appendChild(opt);
+    });
+  }
+  populateSel("t3-f-condition",  opts.conditions);
+  populateSel("t3-f-treatment",  opts.treatments);
+  populateSel("t3-f-sampletype", opts.sample_types);
+
+  document.getElementById("t3-f-condition").value  = "melanoma";
+  document.getElementById("t3-f-treatment").value  = "miraclib";
+  document.getElementById("t3-f-sampletype").value = "PBMC";
+
+  renderTab3(initialData);
+
+  ["t3-f-condition","t3-f-treatment","t3-f-sampletype"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => {
+      const cond  = document.getElementById("t3-f-condition").value;
+      const treat = document.getElementById("t3-f-treatment").value;
+      const type  = document.getElementById("t3-f-sampletype").value;
+      const params = new URLSearchParams();
+      if (cond)  params.set("condition",   cond);
+      if (treat) params.set("treatment",   treat);
+      if (type)  params.set("sample_type", type);
+      d3.json(`/api/part3?${params}`).then(renderTab3).catch(err => {
+        document.getElementById("t3-callout").className = "callout info";
+        document.getElementById("t3-callout").textContent = `No data: ${err.message}`;
+        document.getElementById("t3-boxplots").innerHTML = "";
+        document.getElementById("t3-stats-tbody").innerHTML = "";
+      });
+    });
+  });
+}
+
+function renderTab3({ stats, boxplot, filters, error }) {
+  // Clear previous render
+  document.getElementById("t3-boxplots").innerHTML = "";
+  document.getElementById("t3-stats-tbody").innerHTML = "";
+
+  // Update subtitle
+  const f = filters || {};
+  const parts = [f.condition || "All", f.treatment || "All", f.sample_type || "All"];
+  document.getElementById("t3-subtitle").textContent = parts.join(" · ");
+
+  if (error) {
+    document.getElementById("t3-callout").className = "callout info";
+    document.getElementById("t3-callout").textContent = error;
+    return;
+  }
+
+  if (!stats || !stats.length) {
+    document.getElementById("t3-callout").className = "callout info";
+    document.getElementById("t3-callout").textContent = "No data for the selected filters.";
+    return;
+  }
+
+  // ── Boxplots ──
   function fiveNum(arr) {
     const sorted = [...arr].sort(d3.ascending);
     const q1  = d3.quantile(sorted, .25);

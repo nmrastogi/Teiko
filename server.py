@@ -171,10 +171,14 @@ def api_part2():
 
 @app.route("/api/part3")
 def api_part3():
+    condition   = request.args.get("condition",   "melanoma")
+    treatment   = request.args.get("treatment",   "miraclib")
+    sample_type = request.args.get("sample_type", "PBMC")
+
     try:
         conn = get_connection()
         try:
-            melanoma_df = load_melanoma_miraclib_pbmc(conn)
+            melanoma_df = load_melanoma_miraclib_pbmc(conn, condition, treatment, sample_type)
         except sqlite3.DatabaseError as e:
             log.error("Part 3 query failed: %s", e)
             return jsonify({"error": str(e)}), 500
@@ -183,6 +187,13 @@ def api_part3():
     except sqlite3.OperationalError as e:
         log.error("Could not connect to database: %s", e)
         return jsonify({"error": str(e)}), 500
+
+    if melanoma_df.empty:
+        return jsonify({"error": "No samples match the selected filters."}), 404
+
+    resp_groups = melanoma_df["response"].unique()
+    if "yes" not in resp_groups or "no" not in resp_groups:
+        return jsonify({"error": "Both responder and non-responder groups are required for statistical comparison."}), 422
 
     stats_df = run_statistics(melanoma_df)
 
@@ -208,8 +219,8 @@ def api_part3():
         for pop in POPULATIONS
     }
 
-    log.info("Part 3: returned stats for %d populations", len(stats_list))
-    return jsonify({"stats": stats_list, "boxplot": boxplot})
+    log.info("Part 3: %s / %s / %s → %d samples", condition, treatment, sample_type, len(melanoma_df))
+    return jsonify({"stats": stats_list, "boxplot": boxplot, "filters": {"condition": condition, "treatment": treatment, "sample_type": sample_type}})
 
 
 # ---------------------------------------------------------------------------

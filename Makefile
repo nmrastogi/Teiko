@@ -1,4 +1,4 @@
-.PHONY: setup pipeline dashboard
+.PHONY: setup pipeline dashboard test
 
 setup:
 	pip install -r requirements.txt
@@ -8,4 +8,7 @@ pipeline:
 	python analysis.py
 
 dashboard:
-	python3 -m http.server 8080 --directory .
+	python server.py
+
+test:
+	pytest tests/test_data.py -v

@@ -238,6 +238,9 @@
     <div class="filter-group"><label>Condition</label><select id="f-condition"><option value="">All</option></select></div>
     <div class="filter-group"><label>Treatment</label><select id="f-treatment"><option value="">All</option></select></div>
     <div class="filter-group"><label>Sample Type</label><select id="f-sampletype"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Time Point (days)</label><select id="f-time"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Response</label><select id="f-response"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Sex</label><select id="f-sex"><option value="">All</option></select></div>
     <div class="filter-group"><label>Population</label><select id="f-population"><option value="">All</option></select></div>
   </div>
 
@@ -246,7 +249,9 @@
   <div class="table-wrap">
     <table id="t2-table">
       <thead><tr>
-        <th>Sample</th><th>Population</th><th>Count</th><th>Total Count</th><th>Frequency (%)</th>
+        <th>Sample</th><th>Project</th><th>Condition</th><th>Sex</th>
+        <th>Treatment</th><th>Response</th><th>Sample Type</th><th>Time (days)</th>
+        <th>Population</th><th>Count</th><th>Total Count</th><th>Frequency (%)</th>
       </tr></thead>
       <tbody id="t2-tbody"></tbody>
     </table>
@@ -297,8 +302,17 @@
 
 <!-- ═══════════════════════ TAB 4 ═══════════════════════ -->
 <div id="tab4" class="tab-panel">
-  <h2>Baseline Subset Analysis</h2>
-  <p class="subtitle">Melanoma · PBMC · time_from_treatment_start = 0 · Miraclib</p>
+  <h2>Subset Analysis</h2>
+  <p class="subtitle">Select filters below to explore different patient subsets.</p>
+
+  <div class="filter-row">
+    <div class="filter-group"><label>Condition</label><select id="t4-f-condition"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Sample Type</label><select id="t4-f-sampletype"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Time from Treatment Start (days)</label><select id="t4-f-time"><option value="">All</option></select></div>
+    <div class="filter-group"><label>Treatment</label><select id="t4-f-treatment"><option value="">All</option></select></div>
+  </div>
+
+  <p id="t4-subtitle" class="subtitle" style="font-weight:600;color:#2b6cb0;margin-top:-6px;"></p>
 
   <div class="kpi-row" id="t4-kpis"></div>
 
@@ -309,10 +323,10 @@
   </div>
 
   <br/>
-  <h3 style="font-size:1rem;color:#2d3748;margin-bottom:12px;">Average B-Cell Count — Melanoma Male Responders at Time = 0</h3>
+  <h3 id="t4-avg-title" style="font-size:1rem;color:#2d3748;margin-bottom:12px;"></h3>
   <div class="highlight-card">
     <div>
-      <div class="hl-label">Avg B Cells (Melanoma · Male · Responder · t = 0)</div>
+      <div class="hl-label" id="t4-avg-label"></div>
       <div class="hl-value" id="t4-avg-b"></div>
       <div class="hl-sub" id="t4-avg-b-n"></div>
     </div>
@@ -350,10 +364,11 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 // Load all data then render
 // ════════════════════════════════════════════════
 Promise.all([
-  d3.json("outputs/data_part2.json"),
-  d3.json("outputs/data_part3.json"),
-  d3.json("outputs/data_part4.json"),
-]).then(([p2raw, p3raw, p4raw]) => {
+  d3.json("/api/part2"),
+  d3.json("/api/part3"),
+  d3.json("/api/part4"),
+  d3.json("/api/part4/opts"),
+]).then(([p2raw, p3raw, p4raw, opts]) => {
   document.getElementById("loading").style.display = "none";
   document.querySelectorAll(".tab-panel").forEach(p => {
     if (p.id === "tab2") p.classList.add("active");
@@ -361,7 +376,7 @@ Promise.all([
 
   renderTab2(p2raw.samples);
   renderTab3(p3raw);
-  renderTab4(p4raw);
+  initTab4(opts, p4raw);
 }).catch(err => {
   document.getElementById("loading").innerHTML =
     `<span style="color:#e53e3e">Error loading data: ${err.message}<br>
@@ -377,6 +392,9 @@ function renderTab2(samples) {
   const conditions   = unique(samples.map(s => s.condition));
   const treatments   = unique(samples.map(s => s.treatment));
   const sampleTypes  = unique(samples.map(s => s.sample_type));
+  const times        = unique(samples.map(s => String(s.time)));
+  const responses    = unique(samples.filter(s => s.response).map(s => s.response));
+  const sexes        = unique(samples.map(s => s.sex));
 
   function populate(id, values) {
     const sel = document.getElementById(id);
@@ -389,6 +407,9 @@ function renderTab2(samples) {
   populate("f-condition",  conditions);
   populate("f-treatment",  treatments);
   populate("f-sampletype", sampleTypes);
+  populate("f-time",       times);
+  populate("f-response",   responses);
+  populate("f-sex",        sexes);
   POPULATIONS.forEach(p => {
     const sel = document.getElementById("f-population");
     const opt = document.createElement("option");
@@ -402,20 +423,33 @@ function renderTab2(samples) {
   let filteredRows = [];
 
   function getRows() {
-    const fCond = document.getElementById("f-condition").value;
+    const fCond  = document.getElementById("f-condition").value;
     const fTreat = document.getElementById("f-treatment").value;
-    const fType = document.getElementById("f-sampletype").value;
-    const fPop = document.getElementById("f-population").value;
+    const fType  = document.getElementById("f-sampletype").value;
+    const fTime  = document.getElementById("f-time").value;
+    const fResp  = document.getElementById("f-response").value;
+    const fSex   = document.getElementById("f-sex").value;
+    const fPop   = document.getElementById("f-population").value;
 
     const rows = [];
     samples.forEach(s => {
-      if (fCond  && s.condition   !== fCond)  return;
-      if (fTreat && s.treatment   !== fTreat) return;
-      if (fType  && s.sample_type !== fType)  return;
+      if (fCond  && s.condition   !== fCond)        return;
+      if (fTreat && s.treatment   !== fTreat)       return;
+      if (fType  && s.sample_type !== fType)        return;
+      if (fTime  && String(s.time) !== fTime)       return;
+      if (fResp  && (s.response || "") !== fResp)   return;
+      if (fSex   && s.sex         !== fSex)         return;
       const pops = fPop ? [fPop] : POPULATIONS;
       pops.forEach(pop => {
         rows.push({
           sample:      s.sample,
+          project:     s.project,
+          condition:   s.condition,
+          sex:         s.sex,
+          treatment:   s.treatment,
+          response:    s.response || "—",
+          sample_type: s.sample_type,
+          time:        s.time,
           population:  pop,
           count:       s.populations[pop].count,
           total_count: s.total_count,
@@ -441,7 +475,19 @@ function renderTab2(samples) {
     tbody.innerHTML = "";
     slice.forEach(r => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${r.sample}</td><td>${POP_LABELS[r.population]}</td><td>${r.count.toLocaleString()}</td><td>${r.total_count.toLocaleString()}</td><td>${r.percentage.toFixed(2)}%</td>`;
+      tr.innerHTML = `
+        <td>${r.sample}</td>
+        <td>${r.project}</td>
+        <td>${r.condition}</td>
+        <td>${r.sex}</td>
+        <td>${r.treatment}</td>
+        <td>${r.response}</td>
+        <td>${r.sample_type}</td>
+        <td>${r.time}</td>
+        <td>${POP_LABELS[r.population]}</td>
+        <td>${r.count.toLocaleString()}</td>
+        <td>${r.total_count.toLocaleString()}</td>
+        <td>${r.percentage.toFixed(2)}%</td>`;
       tbody.appendChild(tr);
     });
 
@@ -453,7 +499,7 @@ function renderTab2(samples) {
     renderBarChart(filteredRows);
   }
 
-  ["f-condition","f-treatment","f-sampletype","f-population"].forEach(id => {
+  ["f-condition","f-treatment","f-sampletype","f-time","f-response","f-sex","f-population"].forEach(id => {
     document.getElementById(id).addEventListener("change", () => { currentPage = 0; renderTable(); });
   });
   document.getElementById("t2-prev").addEventListener("click", () => { currentPage--; renderTable(); });
@@ -514,9 +560,16 @@ function renderTab2(samples) {
     const fCond  = document.getElementById("f-condition").value  || "All";
     const fTreat = document.getElementById("f-treatment").value  || "All";
     const fType  = document.getElementById("f-sampletype").value || "All";
+    const fTime  = document.getElementById("f-time").value;
+    const fResp  = document.getElementById("f-response").value;
+    const fSex   = document.getElementById("f-sex").value;
     const fPop   = document.getElementById("f-population").value;
-    document.getElementById("t2-chart-subtitle").textContent =
-      `— ${fCond} · ${fTreat} · ${fType}${fPop ? " · "+POP_LABELS[fPop] : ""}`;
+    const parts  = [fCond, fTreat, fType];
+    if (fTime) parts.push(`t=${fTime}d`);
+    if (fResp) parts.push(`resp=${fResp}`);
+    if (fSex)  parts.push(`sex=${fSex}`);
+    if (fPop)  parts.push(POP_LABELS[fPop]);
+    document.getElementById("t2-chart-subtitle").textContent = `— ${parts.join(" · ")}`;
   }
 
   renderTable();
@@ -720,9 +773,65 @@ function renderTab3({ stats, boxplot }) {
 
 
 // ════════════════════════════════════════════════
-// TAB 4 – Baseline Subset
+// TAB 4 – Subset Analysis (dynamic filters)
 // ════════════════════════════════════════════════
+function initTab4(opts, initialData) {
+  // Populate dropdowns from opts
+  function populateSel(id, values, fmt) {
+    const sel = document.getElementById(id);
+    values.forEach(v => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = fmt ? fmt(v) : v;
+      sel.appendChild(opt);
+    });
+  }
+  populateSel("t4-f-condition",  opts.conditions,   null);
+  populateSel("t4-f-sampletype", opts.sample_types, null);
+  populateSel("t4-f-time",       opts.times,        v => `Day ${v}`);
+  populateSel("t4-f-treatment",  opts.treatments,   null);
+
+  // Set defaults to match initial data
+  document.getElementById("t4-f-condition").value  = "melanoma";
+  document.getElementById("t4-f-sampletype").value = "PBMC";
+  document.getElementById("t4-f-time").value       = "0";
+  document.getElementById("t4-f-treatment").value  = "miraclib";
+
+  // Render with initial data (no extra fetch needed)
+  renderTab4(initialData);
+
+  // Re-fetch on filter change
+  ["t4-f-condition","t4-f-sampletype","t4-f-time","t4-f-treatment"].forEach(id => {
+    document.getElementById(id).addEventListener("change", () => {
+      const cond  = document.getElementById("t4-f-condition").value;
+      const type  = document.getElementById("t4-f-sampletype").value;
+      const time  = document.getElementById("t4-f-time").value;
+      const treat = document.getElementById("t4-f-treatment").value;
+      const params = new URLSearchParams();
+      if (cond)       params.set("condition",   cond);
+      if (type)       params.set("sample_type", type);
+      if (time !== "") params.set("time",       time);
+      if (treat)      params.set("treatment",   treat);
+      d3.json(`/api/part4?${params}`).then(renderTab4);
+    });
+  });
+}
+
 function renderTab4(d) {
+  // Clear all containers before re-render
+  ["t4-kpis","t4-proj-chart","t4-resp-chart","t4-sex-chart"].forEach(id => {
+    document.getElementById(id).innerHTML = "";
+  });
+
+  // Active filter labels for subtitle
+  const f = d.filters || {};
+  const condLabel  = f.condition   ? f.condition   : "All conditions";
+  const typeLabel  = f.sample_type ? f.sample_type : "All sample types";
+  const timeLabel  = f.time != null ? `Day ${f.time}` : "All time points";
+  const treatLabel = f.treatment   ? f.treatment   : "All treatments";
+  document.getElementById("t4-subtitle").textContent =
+    `Filter: ${condLabel} · ${typeLabel} · ${timeLabel} · ${treatLabel}`;
+
   // KPI cards
   const kpiData = [
     { label: "Total Samples",  value: d.total_samples.toLocaleString() },
@@ -735,8 +844,23 @@ function renderTab4(d) {
   });
 
   // Avg B-cell highlight
-  document.getElementById("t4-avg-b").textContent = d.avg_b_cell_male_resp.toLocaleString("en", {minimumFractionDigits:2, maximumFractionDigits:2});
-  document.getElementById("t4-avg-b-n").textContent = `n = ${d.n_male_resp} subjects`;
+  const avgTitle = `Average B-Cell Count — ${condLabel} · Male Responders · ${typeLabel} · ${timeLabel}`;
+  document.getElementById("t4-avg-title").textContent = avgTitle;
+  document.getElementById("t4-avg-label").textContent = `Avg B Cells (Male · Responder · ${condLabel} · ${timeLabel})`;
+  if (d.avg_b_cell_male_resp != null) {
+    document.getElementById("t4-avg-b").textContent =
+      d.avg_b_cell_male_resp.toLocaleString("en", {minimumFractionDigits:2, maximumFractionDigits:2});
+    document.getElementById("t4-avg-b-n").textContent = `n = ${d.n_male_resp} samples`;
+  } else {
+    document.getElementById("t4-avg-b").textContent = "—";
+    document.getElementById("t4-avg-b-n").textContent = "No male responders in this subset";
+  }
+
+  if (d.total_samples === 0) {
+    document.getElementById("t4-kpis").innerHTML =
+      `<p style="color:#718096;font-size:.95rem">No samples match the selected filters.</p>`;
+    return;
+  }
 
   // ── Donut: samples per project ──
   function renderDonut(containerId, dataObj, colorScale) {
@@ -761,7 +885,6 @@ function renderTab4(d) {
       .attr("text-anchor","middle").attr("font-size","11").attr("fill","#fff").attr("font-weight","600")
       .text(d => d.data.value);
 
-    // Legend below
     const legend = d3.select(el).append("div")
       .style("display","flex").style("justify-content","center").style("gap","14px").style("font-size",".78rem");
     data.forEach(item => {
@@ -776,6 +899,10 @@ function renderTab4(d) {
   // ── Bar charts ──
   function renderBar(containerId, dataObj, labelMap, colors) {
     const el = document.getElementById(containerId);
+    if (!dataObj || Object.keys(dataObj).length === 0) {
+      el.innerHTML = `<p style="color:#718096;font-size:.85rem;padding:8px">No data</p>`;
+      return;
+    }
     const data = Object.entries(dataObj).map(([k, v]) => ({ key: labelMap[k] || k, raw: k, value: v }));
     const margin = { top: 10, right: 10, bottom: 36, left: 46 };
     const W = 200, H = 200;

@@ -8,10 +8,17 @@ Outputs written to ./outputs/:
   part4_results.txt         – baseline subset counts and average B-cell answer
 """
 
-import json
+import logging
 import os
 import sqlite3
 import textwrap
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger(__name__)
 
 import matplotlib
 matplotlib.use("Agg")
@@ -32,9 +39,13 @@ POPULATIONS = ["b_cell", "cd8_t_cell", "cd4_t_cell", "nk_cell", "monocyte"]
 # ---------------------------------------------------------------------------
 
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+    except sqlite3.OperationalError as e:
+        log.error("Failed to connect to database '%s': %s", DB_PATH, e)
+        raise
 
 
 def ensure_output_dir() -> None:
@@ -49,30 +60,19 @@ def build_summary_table(conn: sqlite3.Connection) -> pd.DataFrame:
     """Return long-form summary: one row per (sample, population)."""
     query = """
         SELECT
-            s.sample_id                    AS sample,
-            cc.b_cell, cc.cd8_t_cell, cc.cd4_t_cell, cc.nk_cell, cc.monocyte
-        FROM samples s
-        JOIN cell_counts cc ON cc.sample_id = s.sample_id
-        ORDER BY s.sample_id
+            cf.sample_id  AS sample,
+            cf.total_count,
+            cf.population,
+            cf.count,
+            cf.percentage
+        FROM cell_frequencies cf
+        ORDER BY cf.sample_id, cf.population
     """
-    wide = pd.read_sql_query(query, conn)
-
-    wide["total_count"] = wide[POPULATIONS].sum(axis=1)
-
-    rows = []
-    for _, row in wide.iterrows():
-        for pop in POPULATIONS:
-            rows.append(
-                {
-                    "sample": row["sample"],
-                    "total_count": int(row["total_count"]),
-                    "population": pop,
-                    "count": int(row[pop]),
-                    "percentage": round(row[pop] / row["total_count"] * 100, 4),
-                }
-            )
-
-    return pd.DataFrame(rows)
+    try:
+        return pd.read_sql_query(query, conn)
+    except sqlite3.DatabaseError as e:
+        log.error("Query failed in build_summary_table: %s", e)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,11 @@ def load_melanoma_miraclib_pbmc(conn: sqlite3.Connection) -> pd.DataFrame:
           AND s.response       != ''
         ORDER BY s.sample_id
     """
-    df = pd.read_sql_query(query, conn)
+    try:
+        df = pd.read_sql_query(query, conn)
+    except sqlite3.DatabaseError as e:
+        log.error("Query failed in load_melanoma_miraclib_pbmc: %s", e)
+        raise
     df["total_count"] = df[POPULATIONS].sum(axis=1)
     for pop in POPULATIONS:
         df[f"{pop}_pct"] = df[pop] / df["total_count"] * 100
@@ -204,7 +208,7 @@ def plot_boxplots(df: pd.DataFrame, stats_df: pd.DataFrame, out_path: str) -> No
     plt.tight_layout(rect=[0, 0.04, 1, 1])
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
-    print(f"  Boxplot saved: {out_path}")
+    log.info("Boxplot saved: %s", out_path)
 
 
 # ---------------------------------------------------------------------------
@@ -236,7 +240,11 @@ def run_part4(conn: sqlite3.Connection) -> str:
           AND s.treatment                 = 'miraclib'
         ORDER BY s.sample_id
     """
-    df = pd.read_sql_query(base_query, conn)
+    try:
+        df = pd.read_sql_query(base_query, conn)
+    except sqlite3.DatabaseError as e:
+        log.error("Query failed in run_part4: %s", e)
+        raise
 
     total_samples   = len(df)
     total_subjects  = df["subject_id"].nunique()
@@ -282,191 +290,64 @@ def run_part4(conn: sqlite3.Connection) -> str:
 
 
 # ---------------------------------------------------------------------------
-# JSON export for D3.js dashboard
-# ---------------------------------------------------------------------------
-
-POP_LABELS = {
-    "b_cell":      "B Cell",
-    "cd8_t_cell":  "CD8 T Cell",
-    "cd4_t_cell":  "CD4 T Cell",
-    "nk_cell":     "NK Cell",
-    "monocyte":    "Monocyte",
-}
-
-
-def export_json(conn: sqlite3.Connection) -> None:
-    """Export three JSON files consumed by the D3.js dashboard."""
-
-    # ---- data_part2.json ----
-    query = """
-        SELECT
-            s.sample_id AS sample,
-            sub.project_id  AS project,
-            sub.condition,
-            sub.sex,
-            s.treatment,
-            s.response,
-            s.sample_type,
-            s.time_from_treatment_start AS time,
-            cc.b_cell, cc.cd8_t_cell, cc.cd4_t_cell, cc.nk_cell, cc.monocyte
-        FROM samples s
-        JOIN subjects sub ON sub.subject_id = s.subject_id
-        JOIN cell_counts cc ON cc.sample_id = s.sample_id
-        ORDER BY s.sample_id
-    """
-    wide = pd.read_sql_query(query, conn)
-    wide["total_count"] = wide[POPULATIONS].sum(axis=1)
-
-    samples_json = []
-    for _, row in wide.iterrows():
-        pops = {}
-        for pop in POPULATIONS:
-            pops[pop] = {
-                "count": int(row[pop]),
-                "percentage": round(row[pop] / row["total_count"] * 100, 4),
-            }
-        samples_json.append({
-            "sample":       row["sample"],
-            "project":      row["project"],
-            "condition":    row["condition"],
-            "sex":          row["sex"],
-            "treatment":    row["treatment"],
-            "response":     None if pd.isna(row["response"]) else row["response"],
-            "sample_type":  row["sample_type"],
-            "time":         int(row["time"]),
-            "total_count":  int(row["total_count"]),
-            "populations":  pops,
-        })
-
-    out2 = os.path.join(OUT_DIR, "data_part2.json")
-    with open(out2, "w") as fh:
-        json.dump({"samples": samples_json}, fh)
-    print(f"  Part 2 JSON saved: {out2}")
-
-    # ---- data_part3.json ----
-    melanoma_df = load_melanoma_miraclib_pbmc(conn)
-    stats_df    = run_statistics(melanoma_df)
-
-    stats_list = []
-    for _, row in stats_df.iterrows():
-        stats_list.append({
-            "population":       row["population"],
-            "label":            POP_LABELS[row["population"]],
-            "n_responders":     int(row["n_responders"]),
-            "n_non_responders": int(row["n_non_responders"]),
-            "median_resp":      float(row["median_responders"]),
-            "median_nonresp":   float(row["median_non_responders"]),
-            "p_value":          float(row["p_value"]),
-            "p_value_fdr":      float(row["p_value_fdr"]),
-            "significant_fdr":  bool(row["significant_fdr"]),
-        })
-
-    boxplot_data = {}
-    for pop in POPULATIONS:
-        col = f"{pop}_pct"
-        boxplot_data[pop] = {
-            "yes": [round(v, 4) for v in melanoma_df.loc[melanoma_df.response == "yes", col].tolist()],
-            "no":  [round(v, 4) for v in melanoma_df.loc[melanoma_df.response == "no",  col].tolist()],
-        }
-
-    out3 = os.path.join(OUT_DIR, "data_part3.json")
-    with open(out3, "w") as fh:
-        json.dump({"stats": stats_list, "boxplot": boxplot_data}, fh)
-    print(f"  Part 3 JSON saved: {out3}")
-
-    # ---- data_part4.json ----
-    part4_query = """
-        SELECT
-            s.sample_id,
-            sub.subject_id,
-            sub.project_id,
-            sub.sex,
-            s.response,
-            cc.b_cell
-        FROM samples s
-        JOIN subjects sub ON sub.subject_id = s.subject_id
-        JOIN cell_counts cc ON cc.sample_id = s.sample_id
-        WHERE sub.condition               = 'melanoma'
-          AND s.sample_type               = 'PBMC'
-          AND s.time_from_treatment_start = 0
-          AND s.treatment                 = 'miraclib'
-    """
-    p4 = pd.read_sql_query(part4_query, conn)
-    male_resp = p4[(p4["sex"] == "M") & (p4["response"] == "yes")]
-
-    p4_json = {
-        "total_samples":           int(len(p4)),
-        "total_subjects":          int(p4["subject_id"].nunique()),
-        "samples_per_project":     {k: int(v) for k, v in p4.groupby("project_id").size().to_dict().items()},
-        "subjects_by_response":    {k: int(v) for k, v in p4.groupby("response")["subject_id"].nunique().to_dict().items()},
-        "subjects_by_sex":         {k: int(v) for k, v in p4.groupby("sex")["subject_id"].nunique().to_dict().items()},
-        "avg_b_cell_male_resp":    round(float(male_resp["b_cell"].mean()), 2),
-        "n_male_resp":             int(len(male_resp)),
-    }
-
-    out4 = os.path.join(OUT_DIR, "data_part4.json")
-    with open(out4, "w") as fh:
-        json.dump(p4_json, fh, indent=2)
-    print(f"  Part 4 JSON saved: {out4}")
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     ensure_output_dir()
     conn = get_connection()
+    try:
+        # ------ Part 2 ------
+        log.info("Part 2: building summary table …")
+        summary = build_summary_table(conn)
+        out2 = os.path.join(OUT_DIR, "part2_summary_table.csv")
+        summary.to_csv(out2, index=False)
+        log.info("Summary table saved: %s  (%d rows)", out2, len(summary))
 
-    # ------ Part 2 ------
-    print("Part 2: building summary table …")
-    summary = build_summary_table(conn)
-    out2 = os.path.join(OUT_DIR, "part2_summary_table.csv")
-    summary.to_csv(out2, index=False)
-    print(f"  Summary table saved: {out2}  ({len(summary)} rows)")
-
-    # ------ Part 3 ------
-    print("\nPart 3: statistical analysis …")
-    melanoma_df = load_melanoma_miraclib_pbmc(conn)
-    print(
-        f"  Samples: {len(melanoma_df)}  "
-        f"(responders={len(melanoma_df[melanoma_df.response=='yes'])}, "
-        f"non-responders={len(melanoma_df[melanoma_df.response=='no'])})"
-    )
-
-    stats_df = run_statistics(melanoma_df)
-    out3_stats = os.path.join(OUT_DIR, "part3_stats.csv")
-    stats_df.to_csv(out3_stats, index=False)
-    print(f"  Stats table saved: {out3_stats}")
-
-    print("\n  Statistical results (Mann-Whitney U + BH-FDR correction):")
-    print(f"  {'Population':<15} {'p-value':>10} {'p-FDR':>10} {'Significant':>12}")
-    print(f"  {'-'*15} {'-'*10} {'-'*10} {'-'*12}")
-    for _, row in stats_df.iterrows():
-        sig = "YES *" if row["significant_fdr"] else "no"
-        print(
-            f"  {row['population']:<15} {row['p_value']:>10.6f} "
-            f"{row['p_value_fdr']:>10.6f} {sig:>12}"
+        # ------ Part 3 ------
+        log.info("Part 3: statistical analysis …")
+        melanoma_df = load_melanoma_miraclib_pbmc(conn)
+        log.info(
+            "Samples: %d  (responders=%d, non-responders=%d)",
+            len(melanoma_df),
+            len(melanoma_df[melanoma_df.response == "yes"]),
+            len(melanoma_df[melanoma_df.response == "no"]),
         )
 
-    out3_plot = os.path.join(OUT_DIR, "part3_boxplot.png")
-    plot_boxplots(melanoma_df, stats_df, out3_plot)
+        stats_df = run_statistics(melanoma_df)
+        out3_stats = os.path.join(OUT_DIR, "part3_stats.csv")
+        stats_df.to_csv(out3_stats, index=False)
+        log.info("Stats table saved: %s", out3_stats)
 
-    # ------ Part 4 ------
-    print("\nPart 4: baseline subset analysis …")
-    report = run_part4(conn)
-    print(report)
-    out4 = os.path.join(OUT_DIR, "part4_results.txt")
-    with open(out4, "w") as fh:
-        fh.write(report + "\n")
-    print(f"\n  Part 4 report saved: {out4}")
+        log.info("Statistical results (Mann-Whitney U + BH-FDR correction):")
+        log.info("  %-15s %10s %10s %12s", "Population", "p-value", "p-FDR", "Significant")
+        log.info("  %s %s %s %s", "-"*15, "-"*10, "-"*10, "-"*12)
+        for _, row in stats_df.iterrows():
+            sig = "YES *" if row["significant_fdr"] else "no"
+            log.info(
+                "  %-15s %10.6f %10.6f %12s",
+                row["population"], row["p_value"], row["p_value_fdr"], sig,
+            )
 
-    # ------ JSON export for D3 dashboard ------
-    print("\nExporting JSON for D3 dashboard …")
-    export_json(conn)
+        out3_plot = os.path.join(OUT_DIR, "part3_boxplot.png")
+        plot_boxplots(melanoma_df, stats_df, out3_plot)
 
-    conn.close()
-    print("\nAnalysis complete. Outputs are in ./outputs/")
+        # ------ Part 4 ------
+        log.info("Part 4: baseline subset analysis …")
+        report = run_part4(conn)
+        log.info("%s", report)
+        out4 = os.path.join(OUT_DIR, "part4_results.txt")
+        with open(out4, "w") as fh:
+            fh.write(report + "\n")
+        log.info("Part 4 report saved: %s", out4)
+
+        log.info("Analysis complete. Outputs are in ./outputs/")
+
+    except Exception as e:
+        log.error("Analysis failed: %s", e)
+        raise
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

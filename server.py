@@ -3,10 +3,12 @@ server.py – Flask server for the Teiko D3.js dashboard.
 
 Routes:
   GET /                → serves index.html
-  GET /api/part2       → all sample frequencies (queried live from teiko.db)
+  GET /api/part2       → sample frequencies, filtered server-side
+                         query params: condition, treatment, sample_type, time, response, sex, population
+  GET /api/part2/opts  → distinct values for Part 2 filter dropdowns
   GET /api/part3       → responder vs non-responder stats + boxplot data
   GET /api/part4       → filtered baseline subset
-                         query params: condition, sample_type, time (default: melanoma/PBMC/0)
+                         query params: condition, sample_type, time, treatment
   GET /api/part4/opts  → distinct values for Part 4 filter dropdowns
 """
 
@@ -48,12 +50,64 @@ def index():
 
 
 # ---------------------------------------------------------------------------
+# API – Part 2 filter options
+# ---------------------------------------------------------------------------
+
+@app.route("/api/part2/opts")
+def api_part2_opts():
+    queries = {
+        "conditions":   "SELECT DISTINCT condition FROM subjects ORDER BY condition",
+        "treatments":   "SELECT DISTINCT treatment FROM samples ORDER BY treatment",
+        "sample_types": "SELECT DISTINCT sample_type FROM samples ORDER BY sample_type",
+        "times":        "SELECT DISTINCT time_from_treatment_start FROM samples ORDER BY time_from_treatment_start",
+        "responses":    "SELECT DISTINCT response FROM samples WHERE response IS NOT NULL AND response != '' ORDER BY response",
+        "sexes":        "SELECT DISTINCT sex FROM subjects ORDER BY sex",
+    }
+    try:
+        conn = get_connection()
+        try:
+            result = {
+                key: pd.read_sql_query(sql, conn).iloc[:, 0].tolist()
+                for key, sql in queries.items()
+            }
+        except sqlite3.DatabaseError as e:
+            log.error("Part 2 opts query failed: %s", e)
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as e:
+        log.error("Could not connect to database: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
 # API – Part 2
 # ---------------------------------------------------------------------------
 
 @app.route("/api/part2")
 def api_part2():
-    query = """
+    condition   = request.args.get("condition",   "")
+    treatment   = request.args.get("treatment",   "")
+    sample_type = request.args.get("sample_type", "")
+    time        = request.args.get("time",        "")
+    response    = request.args.get("response",    "")
+    sex         = request.args.get("sex",         "")
+    population  = request.args.get("population",  "")
+
+    where_clauses, params = [], []
+    if condition:   where_clauses.append("sub.condition = ?");                    params.append(condition)
+    if treatment:   where_clauses.append("s.treatment = ?");                      params.append(treatment)
+    if sample_type: where_clauses.append("s.sample_type = ?");                   params.append(sample_type)
+    if time:        where_clauses.append("s.time_from_treatment_start = ?");      params.append(int(time))
+    if response:    where_clauses.append("s.response = ?");                       params.append(response)
+    if sex:         where_clauses.append("sub.sex = ?");                          params.append(sex)
+    if population:  where_clauses.append("cf.population = ?");                    params.append(population)
+
+    where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+    query = f"""
         SELECT
             cf.sample_id   AS sample,
             sub.project_id AS project,
@@ -70,12 +124,13 @@ def api_part2():
         FROM cell_frequencies cf
         JOIN samples s    ON s.sample_id    = cf.sample_id
         JOIN subjects sub ON sub.subject_id = s.subject_id
+        {where_sql}
         ORDER BY cf.sample_id, cf.population
     """
     try:
         conn = get_connection()
         try:
-            df = pd.read_sql_query(query, conn)
+            df = pd.read_sql_query(query, conn, params=params if params else None)
         except sqlite3.DatabaseError as e:
             log.error("Part 2 query failed: %s", e)
             return jsonify({"error": str(e)}), 500
@@ -85,31 +140,29 @@ def api_part2():
         log.error("Could not connect to database: %s", e)
         return jsonify({"error": str(e)}), 500
 
-    # Group flat rows into one object per sample (nested populations dict)
-    samples_map = {}
-    for _, row in df.iterrows():
-        sid = row["sample"]
-        if sid not in samples_map:
-            samples_map[sid] = {
-                "sample":      sid,
-                "project":     row["project"],
-                "condition":   row["condition"],
-                "sex":         row["sex"],
-                "treatment":   row["treatment"],
-                "response":    None if pd.isna(row["response"]) else row["response"],
-                "sample_type": row["sample_type"],
-                "time":        int(row["time"]),
-                "total_count": int(row["total_count"]),
-                "populations": {},
-            }
-        samples_map[sid]["populations"][row["population"]] = {
-            "count":      int(row["count"]),
-            "percentage": float(row["percentage"]),
+    rows = [
+        {
+            "sample":      r["sample"],
+            "project":     r["project"],
+            "condition":   r["condition"],
+            "sex":         r["sex"],
+            "treatment":   r["treatment"],
+            "response":    None if pd.isna(r["response"]) else r["response"],
+            "sample_type": r["sample_type"],
+            "time":        int(r["time"]),
+            "total_count": int(r["total_count"]),
+            "population":  r["population"],
+            "count":       int(r["count"]),
+            "percentage":  float(r["percentage"]),
         }
+        for _, r in df.iterrows()
+    ]
 
-    samples_out = list(samples_map.values())
-    log.info("Part 2: returned %d samples", len(samples_out))
-    return jsonify({"samples": samples_out})
+    log.info("Part 2: %d rows returned (filters: %s)", len(rows),
+             {k: v for k, v in [("condition", condition), ("treatment", treatment),
+              ("sample_type", sample_type), ("time", time), ("response", response),
+              ("sex", sex), ("population", population)] if v})
+    return jsonify({"rows": rows, "total": len(rows)})
 
 
 # ---------------------------------------------------------------------------

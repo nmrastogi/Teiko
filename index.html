@@ -364,19 +364,19 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 // Load all data then render
 // ════════════════════════════════════════════════
 Promise.all([
-  d3.json("/api/part2"),
+  d3.json("/api/part2/opts"),
   d3.json("/api/part3"),
   d3.json("/api/part4"),
   d3.json("/api/part4/opts"),
-]).then(([p2raw, p3raw, p4raw, opts]) => {
+]).then(([p2opts, p3raw, p4raw, p4opts]) => {
   document.getElementById("loading").style.display = "none";
   document.querySelectorAll(".tab-panel").forEach(p => {
     if (p.id === "tab2") p.classList.add("active");
   });
 
-  renderTab2(p2raw.samples);
+  initTab2(p2opts);
   renderTab3(p3raw);
-  initTab4(opts, p4raw);
+  initTab4(p4opts, p4raw);
 }).catch(err => {
   document.getElementById("loading").innerHTML =
     `<span style="color:#e53e3e">Error loading data: ${err.message}<br>
@@ -385,31 +385,23 @@ Promise.all([
 
 
 // ════════════════════════════════════════════════
-// TAB 2 – Data Overview
+// TAB 2 – Data Overview (API-based filtering)
 // ════════════════════════════════════════════════
-function renderTab2(samples) {
-  // Populate filter dropdowns
-  const conditions   = unique(samples.map(s => s.condition));
-  const treatments   = unique(samples.map(s => s.treatment));
-  const sampleTypes  = unique(samples.map(s => s.sample_type));
-  const times        = unique(samples.map(s => String(s.time)));
-  const responses    = unique(samples.filter(s => s.response).map(s => s.response));
-  const sexes        = unique(samples.map(s => s.sex));
-
-  function populate(id, values) {
+function initTab2(opts) {
+  function populate(id, values, fmt) {
     const sel = document.getElementById(id);
     values.forEach(v => {
       const opt = document.createElement("option");
-      opt.value = v; opt.textContent = v;
+      opt.value = v; opt.textContent = fmt ? fmt(v) : v;
       sel.appendChild(opt);
     });
   }
-  populate("f-condition",  conditions);
-  populate("f-treatment",  treatments);
-  populate("f-sampletype", sampleTypes);
-  populate("f-time",       times);
-  populate("f-response",   responses);
-  populate("f-sex",        sexes);
+  populate("f-condition",  opts.conditions);
+  populate("f-treatment",  opts.treatments);
+  populate("f-sampletype", opts.sample_types);
+  populate("f-time",       opts.times, v => `Day ${v}`);
+  populate("f-response",   opts.responses);
+  populate("f-sex",        opts.sexes);
   POPULATIONS.forEach(p => {
     const sel = document.getElementById("f-population");
     const opt = document.createElement("option");
@@ -417,60 +409,48 @@ function renderTab2(samples) {
     sel.appendChild(opt);
   });
 
-  // State
   let currentPage = 0;
   const PAGE_SIZE = 100;
-  let filteredRows = [];
+  let currentRows = [];
 
-  function getRows() {
-    const fCond  = document.getElementById("f-condition").value;
-    const fTreat = document.getElementById("f-treatment").value;
-    const fType  = document.getElementById("f-sampletype").value;
-    const fTime  = document.getElementById("f-time").value;
-    const fResp  = document.getElementById("f-response").value;
-    const fSex   = document.getElementById("f-sex").value;
-    const fPop   = document.getElementById("f-population").value;
+  function buildParams() {
+    const p = new URLSearchParams();
+    const cond  = document.getElementById("f-condition").value;
+    const treat = document.getElementById("f-treatment").value;
+    const type  = document.getElementById("f-sampletype").value;
+    const time  = document.getElementById("f-time").value;
+    const resp  = document.getElementById("f-response").value;
+    const sex   = document.getElementById("f-sex").value;
+    const pop   = document.getElementById("f-population").value;
+    if (cond)  p.set("condition",   cond);
+    if (treat) p.set("treatment",   treat);
+    if (type)  p.set("sample_type", type);
+    if (time)  p.set("time",        time);
+    if (resp)  p.set("response",    resp);
+    if (sex)   p.set("sex",         sex);
+    if (pop)   p.set("population",  pop);
+    return p;
+  }
 
-    const rows = [];
-    samples.forEach(s => {
-      if (fCond  && s.condition   !== fCond)        return;
-      if (fTreat && s.treatment   !== fTreat)       return;
-      if (fType  && s.sample_type !== fType)        return;
-      if (fTime  && String(s.time) !== fTime)       return;
-      if (fResp  && (s.response || "") !== fResp)   return;
-      if (fSex   && s.sex         !== fSex)         return;
-      const pops = fPop ? [fPop] : POPULATIONS;
-      pops.forEach(pop => {
-        rows.push({
-          sample:      s.sample,
-          project:     s.project,
-          condition:   s.condition,
-          sex:         s.sex,
-          treatment:   s.treatment,
-          response:    s.response || "—",
-          sample_type: s.sample_type,
-          time:        s.time,
-          population:  pop,
-          count:       s.populations[pop].count,
-          total_count: s.total_count,
-          percentage:  s.populations[pop].percentage,
-        });
-      });
+  function fetchAndRender() {
+    const params = buildParams();
+    d3.json(`/api/part2?${params}`).then(data => {
+      currentRows = data.rows;
+      currentPage = 0;
+      renderTable();
     });
-    return rows;
   }
 
   function renderTable() {
-    filteredRows = getRows();
-    const totalRows    = filteredRows.length;
-    const totalSamples = new Set(filteredRows.map(r => r.sample)).size;
+    const totalRows    = currentRows.length;
+    const totalSamples = new Set(currentRows.map(r => r.sample)).size;
     const totalPages   = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
     if (currentPage >= totalPages) currentPage = 0;
 
     document.getElementById("t2-count").textContent =
       `Showing ${Math.min(PAGE_SIZE, totalRows - currentPage * PAGE_SIZE).toLocaleString()} of ${totalRows.toLocaleString()} rows across ${totalSamples.toLocaleString()} samples`;
 
-    const slice = filteredRows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+    const slice = currentRows.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
     const tbody = document.getElementById("t2-tbody");
     tbody.innerHTML = "";
     slice.forEach(r => {
@@ -481,7 +461,7 @@ function renderTab2(samples) {
         <td>${r.condition}</td>
         <td>${r.sex}</td>
         <td>${r.treatment}</td>
-        <td>${r.response}</td>
+        <td>${r.response ?? "—"}</td>
         <td>${r.sample_type}</td>
         <td>${r.time}</td>
         <td>${POP_LABELS[r.population]}</td>
@@ -496,11 +476,11 @@ function renderTab2(samples) {
     document.getElementById("t2-prev").disabled = currentPage === 0;
     document.getElementById("t2-next").disabled = currentPage >= totalPages - 1;
 
-    renderBarChart(filteredRows);
+    renderBarChart(currentRows);
   }
 
   ["f-condition","f-treatment","f-sampletype","f-time","f-response","f-sex","f-population"].forEach(id => {
-    document.getElementById(id).addEventListener("change", () => { currentPage = 0; renderTable(); });
+    document.getElementById(id).addEventListener("change", fetchAndRender);
   });
   document.getElementById("t2-prev").addEventListener("click", () => { currentPage--; renderTable(); });
   document.getElementById("t2-next").addEventListener("click", () => { currentPage++; renderTable(); });
@@ -509,14 +489,12 @@ function renderTab2(samples) {
     const container = document.getElementById("t2-barchart");
     container.innerHTML = "";
 
-    // Average pct per population
     const totals = {}, counts = {};
     POPULATIONS.forEach(p => { totals[p] = 0; counts[p] = 0; });
     rows.forEach(r => { totals[r.population] += r.percentage; counts[r.population]++; });
     const data = POPULATIONS.map(p => ({
-      pop:   p,
-      label: POP_LABELS[p],
-      avg:   counts[p] > 0 ? totals[p] / counts[p] : 0,
+      pop: p, label: POP_LABELS[p],
+      avg: counts[p] > 0 ? totals[p] / counts[p] : 0,
     }));
 
     const margin = { top: 10, right: 20, bottom: 50, left: 52 };
@@ -529,50 +507,34 @@ function renderTab2(samples) {
       .append("g").attr("transform", `translate(${margin.left},${margin.top})`);
 
     const x = d3.scaleBand().domain(data.map(d => d.label)).range([0, width]).padding(.35);
-    const y = d3.scaleLinear().domain([0, d3.max(data, d => d.avg) * 1.15]).range([height, 0]);
+    const y = d3.scaleLinear().domain([0, d3.max(data, d => d.avg) * 1.15 || 1]).range([height, 0]);
     const color = d3.scaleOrdinal(d3.schemeSet2).domain(data.map(d => d.label));
 
     svg.append("g").attr("transform", `translate(0,${height})`).call(d3.axisBottom(x));
     svg.append("g").call(d3.axisLeft(y).ticks(5).tickFormat(d => d.toFixed(1) + "%"));
-
     svg.append("text").attr("x", -height/2).attr("y", -42).attr("transform","rotate(-90)")
       .attr("text-anchor","middle").attr("font-size","12").attr("fill","#4a5568").text("Avg Frequency (%)");
 
     svg.selectAll(".bar").data(data).join("rect")
-      .attr("class","bar")
-      .attr("x", d => x(d.label))
-      .attr("y", d => y(d.avg))
-      .attr("width", x.bandwidth())
-      .attr("height", d => height - y(d.avg))
-      .attr("fill", d => color(d.label))
-      .attr("rx", 4);
+      .attr("class","bar").attr("x", d => x(d.label)).attr("y", d => y(d.avg))
+      .attr("width", x.bandwidth()).attr("height", d => height - y(d.avg))
+      .attr("fill", d => color(d.label)).attr("rx", 4);
 
     svg.selectAll(".bar-label").data(data).join("text")
       .attr("class","bar-label")
-      .attr("x", d => x(d.label) + x.bandwidth() / 2)
-      .attr("y", d => y(d.avg) - 4)
-      .attr("text-anchor","middle")
-      .attr("font-size","11")
-      .attr("fill","#2d3748")
-      .text(d => d.avg.toFixed(1) + "%");
+      .attr("x", d => x(d.label) + x.bandwidth() / 2).attr("y", d => y(d.avg) - 4)
+      .attr("text-anchor","middle").attr("font-size","11").attr("fill","#2d3748")
+      .text(d => d.avg > 0 ? d.avg.toFixed(1) + "%" : "");
 
-    // subtitle
-    const fCond  = document.getElementById("f-condition").value  || "All";
-    const fTreat = document.getElementById("f-treatment").value  || "All";
-    const fType  = document.getElementById("f-sampletype").value || "All";
-    const fTime  = document.getElementById("f-time").value;
-    const fResp  = document.getElementById("f-response").value;
-    const fSex   = document.getElementById("f-sex").value;
-    const fPop   = document.getElementById("f-population").value;
-    const parts  = [fCond, fTreat, fType];
-    if (fTime) parts.push(`t=${fTime}d`);
-    if (fResp) parts.push(`resp=${fResp}`);
-    if (fSex)  parts.push(`sex=${fSex}`);
-    if (fPop)  parts.push(POP_LABELS[fPop]);
-    document.getElementById("t2-chart-subtitle").textContent = `— ${parts.join(" · ")}`;
+    const params = buildParams();
+    const parts = [];
+    for (const [k, v] of params.entries()) parts.push(`${k}=${v}`);
+    document.getElementById("t2-chart-subtitle").textContent =
+      parts.length ? `— ${parts.join(" · ")}` : "— All samples";
   }
 
-  renderTable();
+  // Initial load — fetch all rows (no filters)
+  fetchAndRender();
 }
 
 

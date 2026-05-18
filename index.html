@@ -272,7 +272,7 @@
 <!-- ═══════════════════════ TAB 3 ═══════════════════════ -->
 <div id="tab3" class="tab-panel">
   <h2>Responders vs Non-Responders</h2>
-  <p class="subtitle">Melanoma · Miraclib · PBMC &nbsp;|&nbsp; Mann-Whitney U test, Benjamini-Hochberg FDR correction</p>
+  <p class="subtitle">Melanoma · Miraclib · PBMC &nbsp;|&nbsp; Mann-Whitney U test, two-sided, α = 0.05</p>
 
   <div class="legend">
     <span><span class="legend-swatch" style="background:#2196F3"></span>Responder</span>
@@ -284,19 +284,19 @@
   <div id="t3-callout"></div>
 
   <div class="chart-card">
-    <h3>Statistical Results (Mann-Whitney U + BH-FDR)</h3>
+    <h3>Statistical Results (Mann-Whitney U, α = 0.05)</h3>
     <div class="table-wrap" style="margin-bottom:0;max-height:none;">
       <table>
         <thead><tr>
           <th>Population</th>
           <th>N Resp.</th><th>N Non-Resp.</th>
           <th>Median Resp (%)</th><th>Median Non-Resp (%)</th>
-          <th>p-value</th><th>p-value (FDR)</th><th>Significant*</th>
+          <th>p-value</th><th>Significant*</th>
         </tr></thead>
         <tbody id="t3-stats-tbody"></tbody>
       </table>
     </div>
-    <p style="font-size:.78rem;color:#718096;margin-top:8px;">* Significant at FDR-adjusted p &lt; 0.05 (Benjamini-Hochberg method)</p>
+    <p style="font-size:.78rem;color:#718096;margin-top:8px;">* Significant at p &lt; 0.05 (Mann-Whitney U, two-sided)</p>
   </div>
 </div>
 
@@ -721,8 +721,8 @@ function renderTab3({ stats, boxplot }) {
     });
 
     // Significance bracket between the two boxes
-    const pStar = s.p_value_fdr < 0.001 ? "***" : s.p_value_fdr < 0.01 ? "**" : s.p_value_fdr < 0.05 ? "*" : "ns";
-    const bktColor = s.significant_fdr ? "#2b6cb0" : "#a0aec0";
+    const pStar = s.p_value < 0.001 ? "***" : s.p_value < 0.01 ? "**" : s.p_value < 0.05 ? "*" : "ns";
+    const bktColor = s.significant ? "#2b6cb0" : "#a0aec0";
     const bktY = -30;
     const bx1 = x("Responder")    + bw / 2;
     const bx2 = x("Non-Responder") + bw / 2;
@@ -739,24 +739,23 @@ function renderTab3({ stats, boxplot }) {
     svg.append("text")
       .attr("x", (bx1 + bx2) / 2).attr("y", bktY - 5)
       .attr("text-anchor","middle").attr("font-size","9.5").attr("fill", bktColor)
-      .attr("font-weight", s.significant_fdr ? "700" : "400")
-      .text(`p=${s.p_value.toFixed(4)}  FDR=${s.p_value_fdr.toFixed(4)}  ${pStar}`);
+      .attr("font-weight", s.significant ? "700" : "400")
+      .text(`p=${s.p_value.toFixed(4)}  ${pStar}`);
   });
 
   // ── Callout ──
-  const sigPops = stats.filter(s => s.significant_fdr).map(s => s.label);
+  const sigPops = stats.filter(s => s.significant).map(s => s.label);
   const callout = document.getElementById("t3-callout");
   callout.className = sigPops.length ? "callout success" : "callout info";
   callout.innerHTML = sigPops.length
-    ? `<strong>Significant populations (FDR &lt; 0.05):</strong> ${sigPops.join(", ")}`
-    : "No cell populations reached FDR-corrected significance at α = 0.05. "
-      + "CD4 T Cell shows the strongest trend (raw p = 0.0133, FDR p = 0.0667).";
+    ? `<strong>Significant populations (p &lt; 0.05):</strong> ${sigPops.join(", ")}`
+    : "No cell populations reached significance at α = 0.05. CD4 T Cell shows the strongest trend (p = 0.0133).";
 
   // ── Stats table ──
   const tbody = document.getElementById("t3-stats-tbody");
   stats.forEach(s => {
     const tr = document.createElement("tr");
-    if (s.significant_fdr) tr.className = "sig-yes";
+    if (s.significant) tr.className = "sig-yes";
     tr.innerHTML = `
       <td>${s.label}</td>
       <td>${s.n_responders}</td>
@@ -764,8 +763,7 @@ function renderTab3({ stats, boxplot }) {
       <td>${s.median_resp.toFixed(3)}%</td>
       <td>${s.median_nonresp.toFixed(3)}%</td>
       <td>${s.p_value.toFixed(6)}</td>
-      <td>${s.p_value_fdr.toFixed(6)}</td>
-      <td>${s.significant_fdr ? "✅ Yes" : "❌ No"}</td>
+      <td>${s.significant ? "✅ Yes" : "❌ No"}</td>
     `;
     tbody.appendChild(tr);
   });

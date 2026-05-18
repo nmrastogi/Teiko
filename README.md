@@ -164,25 +164,14 @@ Single-file dashboard with three tabs, loaded from CDN — no build step require
 
 ### Statistical Methodology (Part 3)
 
-**Significance threshold:** α = 0.05, applied to FDR-corrected p-values.
+**Significance threshold:** α = 0.05 applied directly to raw p-values.
 
 **Test: Mann-Whitney U (two-sided)** was chosen because:
 1. It makes no assumption about the distribution of relative frequencies (non-parametric).
 2. It is robust to outliers and unequal group sizes.
 3. It is the standard non-parametric alternative to the two-sample t-test for comparing two independent groups.
 
-**Multiple testing correction: Benjamini-Hochberg FDR**
-
-Running 5 simultaneous tests (one per cell population) inflates the familywise false-positive risk. At α = 0.05, the probability of at least one spurious significant result across 5 independent tests is `1 − (0.95)^5 ≈ 23%` — far above the intended 5%. Two common corrections exist:
-
-| Method | Controls | Trade-off |
-|---|---|---|
-| Bonferroni | Probability of *any* false positive | Very conservative; multiplies each p-value by the number of tests, losing statistical power |
-| **Benjamini-Hochberg FDR** | *Proportion* of false discoveries among significant results | Less conservative; tolerates up to 5% false discoveries, retaining more power to detect real effects |
-
-BH-FDR is the standard choice in biology and clinical research because it strikes a better balance between controlling false positives and preserving sensitivity.
-
-**Result:** No population survives FDR correction at α = 0.05. CD4 T Cell shows the strongest trend (raw p = 0.0133, FDR-adjusted p = 0.0667) and would be nominally significant without correction — illustrating precisely why correction is necessary. Both raw and FDR-corrected p-values are reported so readers can apply their own thresholds.
+**Result:** CD4 T Cell is the only population that approaches significance (p = 0.0133). No other population reaches α = 0.05. All raw p-values are reported so readers can apply their own thresholds.
 
 ---
 
@@ -248,6 +237,22 @@ The current implementation is well-suited for the scale of this dataset (10,500 
 ### Statistical analysis
 
 The Mann-Whitney U test and BH-FDR correction are appropriate for the current five-population, two-group comparison. Extending the analysis to more populations, more groups, or longitudinal modelling (e.g. mixed-effects models across time points) would require a more structured statistical pipeline — likely in R (using `lme4` or `DESeq2`) or Python (using `pingouin` or `statsmodels`).
+
+### Row updates
+
+The loader uses `INSERT OR IGNORE`, which silently discards any row whose primary key already exists. This makes repeated pipeline runs safe and idempotent, but it means **corrections to source data are never applied** — if a patient's `response` or a sample's `treatment` is amended in the CSV, re-running the pipeline will not update the database.
+
+To support updates, inserts would need to be replaced with upserts using SQLite's `ON CONFLICT … DO UPDATE` clause:
+
+```sql
+INSERT INTO samples (sample_id, subject_id, treatment, response, sample_type, time_from_treatment_start)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(sample_id) DO UPDATE SET
+    response  = excluded.response,
+    treatment = excluded.treatment;
+```
+
+Any sample whose cell counts change would also require `cell_frequencies` to be recomputed for that `sample_id`. Without this, the pre-aggregated percentages would be stale.
 
 ### Schema constraints
 

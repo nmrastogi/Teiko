@@ -16,7 +16,6 @@ import sqlite3
 import pandas as pd
 from flask import Flask, jsonify, request, send_file
 from scipy import stats
-from statsmodels.stats.multitest import multipletests
 
 from analysis import get_connection, load_melanoma_miraclib_pbmc, run_statistics
 
@@ -143,8 +142,7 @@ def api_part3():
             "median_resp":      float(row["median_responders"]),
             "median_nonresp":   float(row["median_non_responders"]),
             "p_value":          float(row["p_value"]),
-            "p_value_fdr":      float(row["p_value_fdr"]),
-            "significant_fdr":  bool(row["significant_fdr"]),
+            "significant":      bool(row["significant"]),
         }
         for _, row in stats_df.iterrows()
     ]

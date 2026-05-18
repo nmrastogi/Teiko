@@ -26,7 +26,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import pandas as pd
 from scipy import stats
-from statsmodels.stats.multitest import multipletests
 
 DB_PATH = "teiko.db"
 OUT_DIR = "outputs"
@@ -108,7 +107,7 @@ def load_melanoma_miraclib_pbmc(conn: sqlite3.Connection) -> pd.DataFrame:
 
 
 def run_statistics(df: pd.DataFrame) -> pd.DataFrame:
-    """Mann-Whitney U test per population; Benjamini-Hochberg FDR correction."""
+    """Mann-Whitney U test per population; significance at α = 0.05 on raw p-values."""
     responders     = df[df["response"] == "yes"]
     non_responders = df[df["response"] == "no"]
 
@@ -129,19 +128,11 @@ def run_statistics(df: pd.DataFrame) -> pd.DataFrame:
                 "median_non_responders": round(non_responders[col].median(), 4),
                 "mannwhitney_U": round(stat, 2),
                 "p_value": round(pval, 6),
+                "significant": bool(pval < 0.05),
             }
         )
 
-    stats_df = pd.DataFrame(records)
-
-    # FDR correction (Benjamini-Hochberg)
-    reject, pvals_corrected, _, _ = multipletests(
-        stats_df["p_value"].values, alpha=0.05, method="fdr_bh"
-    )
-    stats_df["p_value_fdr"] = [round(p, 6) for p in pvals_corrected]
-    stats_df["significant_fdr"] = reject
-
-    return stats_df
+    return pd.DataFrame(records)
 
 
 def plot_boxplots(df: pd.DataFrame, stats_df: pd.DataFrame, out_path: str) -> None:
@@ -173,19 +164,19 @@ def plot_boxplots(df: pd.DataFrame, stats_df: pd.DataFrame, out_path: str) -> No
 
         # Significance annotation
         row = stats_df[stats_df["population"] == pop].iloc[0]
-        p_fdr = row["p_value_fdr"]
-        if p_fdr < 0.001:
+        pval = row["p_value"]
+        if pval < 0.001:
             sig_label = "***"
-        elif p_fdr < 0.01:
+        elif pval < 0.01:
             sig_label = "**"
-        elif p_fdr < 0.05:
+        elif pval < 0.05:
             sig_label = "*"
         else:
             sig_label = "ns"
 
         y_max = max(data_yes.max(), data_no.max()) * 1.05
         ax.annotate(
-            f"p={row['p_value']:.4f}\n(FDR {p_fdr:.4f}) {sig_label}",
+            f"p={pval:.4f} {sig_label}",
             xy=(1.5, y_max),
             ha="center",
             fontsize=7.5,
@@ -319,14 +310,14 @@ def main() -> None:
         stats_df.to_csv(out3_stats, index=False)
         log.info("Stats table saved: %s", out3_stats)
 
-        log.info("Statistical results (Mann-Whitney U + BH-FDR correction):")
-        log.info("  %-15s %10s %10s %12s", "Population", "p-value", "p-FDR", "Significant")
-        log.info("  %s %s %s %s", "-"*15, "-"*10, "-"*10, "-"*12)
+        log.info("Statistical results (Mann-Whitney U, α = 0.05):")
+        log.info("  %-15s %10s %12s", "Population", "p-value", "Significant")
+        log.info("  %s %s %s", "-"*15, "-"*10, "-"*12)
         for _, row in stats_df.iterrows():
-            sig = "YES *" if row["significant_fdr"] else "no"
+            sig = "YES *" if row["significant"] else "no"
             log.info(
-                "  %-15s %10.6f %10.6f %12s",
-                row["population"], row["p_value"], row["p_value_fdr"], sig,
+                "  %-15s %10.6f %12s",
+                row["population"], row["p_value"], sig,
             )
 
         out3_plot = os.path.join(OUT_DIR, "part3_boxplot.png")

@@ -1,6 +1,6 @@
-population,n_responders,n_non_responders,median_responders,median_non_responders,mannwhitney_U,p_value,p_value_fdr,significant_fdr
-b_cell,993,975,9.4323,9.7884,459971.0,0.055702,0.139255,False
-cd8_t_cell,993,975,24.728,24.6031,478176.0,0.639086,0.639086,False
-cd4_t_cell,993,975,30.2206,29.6576,515276.0,0.013344,0.06672,False
-nk_cell,993,975,14.5093,14.7991,464546.0,0.121051,0.201752,False
-monocyte,993,975,19.6097,19.9423,466510.0,0.16315,0.203937,False
+population,n_responders,n_non_responders,median_responders,median_non_responders,mannwhitney_U,p_value,significant
+b_cell,993,975,9.4323,9.7884,459971.0,0.055702,False
+cd8_t_cell,993,975,24.728,24.6031,478176.0,0.639086,False
+cd4_t_cell,993,975,30.2206,29.6576,515276.0,0.013344,True
+nk_cell,993,975,14.5093,14.7991,464546.0,0.121051,False
+monocyte,993,975,19.6097,19.9423,466510.0,0.16315,False

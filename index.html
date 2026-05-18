@@ -306,6 +306,14 @@
     </div>
     <p style="font-size:.78rem;color:#718096;margin-top:8px;">* Significant at p &lt; 0.05 (Mann-Whitney U, two-sided)</p>
   </div>
+
+  <div style="margin-top:8px;padding:12px 16px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:.82rem;color:#4a5568;">
+    <strong>Significance notation:</strong> &nbsp;
+    <span style="margin-right:16px;"><code style="background:#e2e8f0;padding:2px 6px;border-radius:3px;">ns</code> &nbsp; p ≥ 0.05 — not significant</span>
+    <span style="margin-right:16px;"><code style="background:#e2e8f0;padding:2px 6px;border-radius:3px;">*</code> &nbsp; p &lt; 0.05</span>
+    <span style="margin-right:16px;"><code style="background:#e2e8f0;padding:2px 6px;border-radius:3px;">**</code> &nbsp; p &lt; 0.01</span>
+    <span><code style="background:#e2e8f0;padding:2px 6px;border-radius:3px;">***</code> &nbsp; p &lt; 0.001</span>
+  </div>
 </div>
 
 <!-- ═══════════════════════ TAB 4 ═══════════════════════ -->
@@ -372,10 +380,10 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 // Load all data then render
 // ════════════════════════════════════════════════
 Promise.all([
-  d3.json("/api/part2/opts"),
-  d3.json("/api/part3"),
-  d3.json("/api/part4"),
-  d3.json("/api/part4/opts"),
+  d3.json("/api/initial-analysis/opts"),
+  d3.json("/api/statistical-analysis"),
+  d3.json("/api/data-subset-analysis"),
+  d3.json("/api/data-subset-analysis/opts"),
 ]).then(([p2opts, p3raw, p4raw, p4opts]) => {
   document.getElementById("loading").style.display = "none";
   document.querySelectorAll(".tab-panel").forEach(p => {
@@ -442,7 +450,7 @@ function initTab2(opts) {
 
   function fetchAndRender() {
     const params = buildParams();
-    d3.json(`/api/part2?${params}`).then(data => {
+    d3.json(`/api/initial-analysis?${params}`).then(data => {
       currentRows = data.rows;
       currentPage = 0;
       renderTable();
@@ -577,7 +585,7 @@ function initTab3(opts, initialData) {
       if (cond)  params.set("condition",   cond);
       if (treat) params.set("treatment",   treat);
       if (type)  params.set("sample_type", type);
-      d3.json(`/api/part3?${params}`).then(renderTab3).catch(err => {
+      d3.json(`/api/statistical-analysis?${params}`).then(renderTab3).catch(err => {
         document.getElementById("t3-callout").className = "callout info";
         document.getElementById("t3-callout").textContent = `No data: ${err.message}`;
         document.getElementById("t3-boxplots").innerHTML = "";
@@ -609,23 +617,11 @@ function renderTab3({ stats, boxplot, filters, error }) {
     return;
   }
 
-  // ── Boxplots ──
-  function fiveNum(arr) {
-    const sorted = [...arr].sort(d3.ascending);
-    const q1  = d3.quantile(sorted, .25);
-    const med = d3.quantile(sorted, .50);
-    const q3  = d3.quantile(sorted, .75);
-    const iqr = q3 - q1;
-    const lo  = d3.min(sorted.filter(v => v >= q1 - 1.5 * iqr));
-    const hi  = d3.max(sorted.filter(v => v <= q3 + 1.5 * iqr));
-    return { q1, med, q3, lo, hi };
-  }
-
+  // ── Boxplots — quartiles pre-computed server-side ──
   const container = document.getElementById("t3-boxplots");
   const RESP_COLOR    = "#2196F3";
   const NONRESP_COLOR = "#F44336";
 
-  // viewBox dimensions — SVG scales to card width via CSS width="100%"
   const VW = 260, VH = 340;
   const margin = { top: 46, right: 18, bottom: 58, left: 54 };
   const w = VW - margin.left - margin.right;
@@ -637,29 +633,29 @@ function renderTab3({ stats, boxplot, filters, error }) {
     card.style.padding = "14px 10px 10px";
     container.appendChild(card);
 
-    // Panel title as a DOM element above SVG
     const titleEl = document.createElement("div");
     titleEl.style.cssText = "font-size:.92rem;font-weight:700;color:#1a365d;margin-bottom:4px;text-align:center;letter-spacing:.2px";
     titleEl.textContent = s.label;
     card.appendChild(titleEl);
 
-    const respData    = boxplot[s.population].yes;
-    const nonrespData = boxplot[s.population].no;
+    const bpYes = boxplot[s.population].yes;
+    const bpNo  = boxplot[s.population].no;
 
-    const allVals = [...respData, ...nonrespData];
-    const yMin = d3.min(allVals), yMax = d3.max(allVals);
-    const yPad = (yMax - yMin) * .10;
+    // y domain from whiskers + outliers across both groups
+    const allExtremes = [
+      bpYes.whisker_low, bpYes.whisker_high, ...bpYes.outliers,
+      bpNo.whisker_low,  bpNo.whisker_high,  ...bpNo.outliers,
+    ];
+    const yMin = Math.min(...allExtremes);
+    const yMax = Math.max(...allExtremes);
+    const yPad = (yMax - yMin) * 0.10;
 
-    // x scale — two bands for the two groups
     const xGroups = ["Responder", "Non-Responder"];
     const x = d3.scaleBand().domain(xGroups).range([0, w]).padding(0.38);
     const bw = x.bandwidth();
-
-    // y scale with generous padding for bracket annotation
     const y = d3.scaleLinear()
       .domain([Math.max(0, yMin - yPad), yMax + yPad])
-      .range([h, 0])
-      .nice();
+      .range([h, 0]).nice();
 
     const svg = d3.select(card).append("svg")
       .attr("viewBox", `0 0 ${VW} ${VH}`)
@@ -669,85 +665,69 @@ function renderTab3({ stats, boxplot, filters, error }) {
     // Y gridlines
     svg.append("g")
       .call(d3.axisLeft(y).ticks(5).tickSize(-w).tickFormat(""))
-      .call(g => {
-        g.select(".domain").remove();
-        g.selectAll(".tick line")
-          .attr("stroke", "#e2e8f0")
-          .attr("stroke-dasharray", "4,3");
-      });
+      .call(g => { g.select(".domain").remove();
+        g.selectAll(".tick line").attr("stroke","#e2e8f0").attr("stroke-dasharray","4,3"); });
 
     // Y axis
     svg.append("g")
       .call(d3.axisLeft(y).ticks(5).tickFormat(d => d.toFixed(1)))
-      .call(g => g.select(".domain").attr("stroke", "#a0aec0"))
-      .call(g => g.selectAll(".tick line").attr("stroke", "#a0aec0"))
-      .call(g => g.selectAll(".tick text").attr("font-size", "10").attr("fill", "#4a5568"));
+      .call(g => g.select(".domain").attr("stroke","#a0aec0"))
+      .call(g => g.selectAll(".tick line").attr("stroke","#a0aec0"))
+      .call(g => g.selectAll(".tick text").attr("font-size","10").attr("fill","#4a5568"));
 
-    // Y axis title
-    svg.append("text")
-      .attr("transform", "rotate(-90)")
-      .attr("x", -h / 2)
-      .attr("y", -46)
-      .attr("text-anchor", "middle")
-      .attr("font-size", "11")
-      .attr("fill", "#4a5568")
+    svg.append("text").attr("transform","rotate(-90)").attr("x",-h/2).attr("y",-46)
+      .attr("text-anchor","middle").attr("font-size","11").attr("fill","#4a5568")
       .text("Relative Frequency (%)");
 
     // X axis
-    svg.append("g")
-      .attr("transform", `translate(0,${h})`)
+    svg.append("g").attr("transform",`translate(0,${h})`)
       .call(d3.axisBottom(x).tickSize(5))
-      .call(g => g.select(".domain").attr("stroke", "#a0aec0"))
-      .call(g => g.selectAll(".tick line").attr("stroke", "#a0aec0"))
-      .call(g => g.selectAll(".tick text")
-        .attr("font-size", "10.5")
-        .attr("fill", "#4a5568")
+      .call(g => g.select(".domain").attr("stroke","#a0aec0"))
+      .call(g => g.selectAll(".tick line").attr("stroke","#a0aec0"))
+      .call(g => g.selectAll(".tick text").attr("font-size","10.5").attr("fill","#4a5568")
         .text(d => d === "Responder" ? "Responder" : "Non-Resp."));
 
-    // X axis title
-    svg.append("text")
-      .attr("x", w / 2)
-      .attr("y", h + 48)
-      .attr("text-anchor", "middle")
-      .attr("font-size", "11")
-      .attr("fill", "#4a5568")
-      .text("Response Group");
+    svg.append("text").attr("x",w/2).attr("y",h+48).attr("text-anchor","middle")
+      .attr("font-size","11").attr("fill","#4a5568").text("Response Group");
 
-    // Draw boxes
+    // Draw boxes using pre-computed quartiles from server
     const groups = [
-      { data: respData,    color: RESP_COLOR,    key: "Responder" },
-      { data: nonrespData, color: NONRESP_COLOR,  key: "Non-Responder" },
+      { bp: bpYes, color: RESP_COLOR,    key: "Responder" },
+      { bp: bpNo,  color: NONRESP_COLOR, key: "Non-Responder" },
     ];
 
-    groups.forEach(({ data, color, key }) => {
-      const { q1, med, q3, lo, hi } = fiveNum(data);
+    groups.forEach(({ bp, color, key }) => {
+      const { q1, median, q3, whisker_low, whisker_high, outliers } = bp;
       const cx = x(key) + bw / 2;
       const xl = x(key);
 
       // Lower whisker
-      svg.append("line").attr("x1",cx).attr("x2",cx).attr("y1",y(lo)).attr("y2",y(q1))
+      svg.append("line").attr("x1",cx).attr("x2",cx).attr("y1",y(whisker_low)).attr("y2",y(q1))
         .attr("stroke","#718096").attr("stroke-width",1.5);
       // Upper whisker
-      svg.append("line").attr("x1",cx).attr("x2",cx).attr("y1",y(q3)).attr("y2",y(hi))
+      svg.append("line").attr("x1",cx).attr("x2",cx).attr("y1",y(q3)).attr("y2",y(whisker_high))
         .attr("stroke","#718096").attr("stroke-width",1.5);
       // Whisker caps
-      [lo, hi].forEach(cap => {
+      [whisker_low, whisker_high].forEach(cap => {
         svg.append("line")
           .attr("x1", xl + bw*.18).attr("x2", xl + bw*.82)
           .attr("y1", y(cap)).attr("y2", y(cap))
           .attr("stroke","#718096").attr("stroke-width",1.5);
       });
       // IQR box
-      svg.append("rect")
-        .attr("x", xl).attr("y", y(q3))
-        .attr("width", bw).attr("height", y(q1) - y(q3))
-        .attr("fill", color).attr("fill-opacity", .70)
-        .attr("stroke", color).attr("stroke-width", 1.8).attr("rx", 3);
+      svg.append("rect").attr("x",xl).attr("y",y(q3))
+        .attr("width",bw).attr("height",y(q1)-y(q3))
+        .attr("fill",color).attr("fill-opacity",.70)
+        .attr("stroke",color).attr("stroke-width",1.8).attr("rx",3);
       // Median line
-      svg.append("line")
-        .attr("x1", xl).attr("x2", xl + bw)
-        .attr("y1", y(med)).attr("y2", y(med))
-        .attr("stroke", "#1a202c").attr("stroke-width", 2.5);
+      svg.append("line").attr("x1",xl).attr("x2",xl+bw)
+        .attr("y1",y(median)).attr("y2",y(median))
+        .attr("stroke","#1a202c").attr("stroke-width",2.5);
+      // Outlier dots
+      outliers.forEach(ov => {
+        svg.append("circle").attr("cx",cx).attr("cy",y(ov)).attr("r",2.5)
+          .attr("fill","none").attr("stroke",color).attr("stroke-width",1.2).attr("opacity",.6);
+      });
     });
 
     // Significance bracket between the two boxes
@@ -840,7 +820,7 @@ function initTab4(opts, initialData) {
       if (type)       params.set("sample_type", type);
       if (time !== "") params.set("time",       time);
       if (treat)      params.set("treatment",   treat);
-      d3.json(`/api/part4?${params}`).then(renderTab4);
+      d3.json(`/api/data-subset-analysis?${params}`).then(renderTab4);
     });
   });
 }

@@ -145,24 +145,29 @@ Procedural script organised into clearly named functions, one per analytical out
 - **`build_summary_table`** – queries `cell_frequencies` directly; returns a long-form (sample × population) DataFrame with count, total, and percentage columns (Part 2).
 - **`load_melanoma_miraclib_pbmc`** – applies explicit SQL filters; returns a DataFrame with pre-computed `*_pct` columns ready for statistical testing.
 - **`run_statistics`** – Mann-Whitney U test (non-parametric, no normality assumption) for each of the five populations, followed by Benjamini-Hochberg FDR correction across the five simultaneous tests (Part 3).
-- **`plot_boxplots`** – matplotlib figure with one panel per population; annotations show both raw and FDR-corrected p-values.
+- **`plot_boxplots`** – matplotlib figure with one panel per population; annotations show the raw p-value and significance stars.
 - **`run_part4`** – SQL join query for the baseline subset; aggregations are handled in pandas for clarity (Part 4).
 
 ### `server.py` (Flask API)
-Flask application that serves the D3.js dashboard and exposes four API endpoints, each querying `teiko.db` directly at request time — no pre-generated JSON files required:
+Flask application that serves the D3.js dashboard and exposes parameterised API endpoints, each querying `teiko.db` directly at request time — no pre-generated JSON files required.
 
-- **`GET /`** – serves `index.html`
-- **`GET /api/part2`** – joins `cell_frequencies` with `samples` and `subjects`; returns all 10,500 samples with nested population percentages
-- **`GET /api/part3`** – runs Mann-Whitney U + BH-FDR on the melanoma/miraclib/PBMC subset; returns statistics and raw percentage arrays for client-side boxplot rendering
-- **`GET /api/part4`** – accepts `condition`, `sample_type`, `time`, and `treatment` query parameters; returns aggregated counts and the average B-cell count for male responders in the selected subset
-- **`GET /api/part4/opts`** – returns the distinct filter values (conditions, sample types, time points, treatments) used to populate the Part 4 dropdowns
+All three data endpoints accept query parameters so the database does the filtering and aggregation; the browser never receives data it does not need.
+
+| Endpoint | Parameters | What the server computes |
+|---|---|---|
+| `GET /api/initial-analysis` | `condition`, `treatment`, `sample_type`, `time`, `response`, `sex`, `population` | SQL `WHERE` clause built from params; returns only matching rows |
+| `GET /api/initial-analysis/opts` | — | Distinct values for each Initial Analysis dropdown |
+| `GET /api/statistical-analysis` | `condition`, `treatment`, `sample_type` | Mann-Whitney U p-values; **boxplot quartiles (Q1, median, Q3, whiskers, outliers) computed in SQL** via `ROW_NUMBER()` window functions and a CTE chain — no JavaScript arithmetic |
+| `GET /api/data-subset-analysis` | `condition`, `sample_type`, `time`, `treatment` | Aggregated counts and avg B-cell for male responders |
+| `GET /api/data-subset-analysis/opts` | — | Distinct values for each Data Subset Analysis dropdown |
 
 ### `index.html` (D3.js dashboard)
 Single-file dashboard with three tabs, loaded from CDN — no build step required. Key design decisions:
 
-- **Part 2** – seven filter dropdowns (condition, treatment, sample type, time point, response, sex, population) narrow the full 10,500-sample dataset in-browser with instant response; results are shown in a paginated table and an average-frequency bar chart.
-- **Part 3** – five SVG boxplot panels rendered client-side from the raw percentage arrays returned by `/api/part3`; Q1, Q3, IQR, and whiskers are computed in JavaScript. Each panel shows a significance bracket with both raw and FDR-corrected p-values.
-- **Part 4** – four dropdowns (condition, sample type, time point, treatment) trigger a live re-fetch of `/api/part4`; results update a donut chart (samples per project), two bar charts (subjects by response and by sex), and a highlighted avg B-cell metric.
+- **API-based filtering** — the dashboard never loads the full dataset into memory. On page load only the dropdown option lists are fetched. Every filter change sends the selected parameters to the server as query params; the API filters in SQL and returns only the matching rows. This keeps the browser payload small regardless of how large the underlying dataset grows.
+- **Part 2** – seven filter dropdowns (condition, treatment, sample type, time point, response, sex, population); changing any dropdown triggers a new `GET /api/part2?…` request. Results are shown in a paginated table and an average-frequency bar chart.
+- **Part 3** – three filter dropdowns (condition, treatment, sample type); changing any dropdown re-fetches `/api/part3?…`. The server returns pre-computed boxplot statistics (Q1, median, Q3, whisker bounds, outlier points) computed entirely in SQL — the browser only draws the SVG shapes.
+- **Part 4** – four dropdowns (condition, sample type, time point, treatment) trigger a live re-fetch of `/api/part4?…`; results update a donut chart (samples per project), two bar charts (subjects by response and by sex), and a highlighted avg B-cell metric.
 
 ### Statistical Methodology (Part 3)
 

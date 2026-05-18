@@ -2,14 +2,15 @@
 server.py – Flask server for the Teiko D3.js dashboard.
 
 Routes:
-  GET /                → serves index.html
-  GET /api/part2       → sample frequencies, filtered server-side
-                         query params: condition, treatment, sample_type, time, response, sex, population
-  GET /api/part2/opts  → distinct values for Part 2 filter dropdowns
-  GET /api/part3       → responder vs non-responder stats + boxplot data
-  GET /api/part4       → filtered baseline subset
-                         query params: condition, sample_type, time, treatment
-  GET /api/part4/opts  → distinct values for Part 4 filter dropdowns
+  GET /                              → serves index.html
+  GET /api/initial-analysis          → sample frequencies, filtered server-side
+                                       query params: condition, treatment, sample_type, time, response, sex, population
+  GET /api/initial-analysis/opts     → distinct values for Initial Analysis filter dropdowns
+  GET /api/statistical-analysis      → responder vs non-responder stats + boxplot data
+                                       query params: condition, treatment, sample_type
+  GET /api/data-subset-analysis      → filtered baseline subset
+                                       query params: condition, sample_type, time, treatment
+  GET /api/data-subset-analysis/opts → distinct values for Data Subset Analysis filter dropdowns
 """
 
 import logging
@@ -53,8 +54,8 @@ def index():
 # API – Part 2 filter options
 # ---------------------------------------------------------------------------
 
-@app.route("/api/part2/opts")
-def api_part2_opts():
+@app.route("/api/initial-analysis/opts")
+def api_initial_analysis_opts():
     queries = {
         "conditions":   "SELECT DISTINCT condition FROM subjects ORDER BY condition",
         "treatments":   "SELECT DISTINCT treatment FROM samples ORDER BY treatment",
@@ -86,8 +87,8 @@ def api_part2_opts():
 # API – Part 2
 # ---------------------------------------------------------------------------
 
-@app.route("/api/part2")
-def api_part2():
+@app.route("/api/initial-analysis")
+def api_initial_analysis():
     condition   = request.args.get("condition",   "")
     treatment   = request.args.get("treatment",   "")
     sample_type = request.args.get("sample_type", "")
@@ -169,8 +170,86 @@ def api_part2():
 # API – Part 3
 # ---------------------------------------------------------------------------
 
-@app.route("/api/part3")
-def api_part3():
+def _boxplot_from_sql(conn, condition, treatment, sample_type):
+    """Compute quartiles, whiskers and outliers entirely in SQL using CTEs."""
+    query = """
+    WITH base AS (
+        -- Rank each percentage value within (population, response)
+        SELECT
+            cf.population,
+            s.response,
+            ROUND(cf.percentage, 4)                                                              AS pct,
+            ROW_NUMBER() OVER (PARTITION BY cf.population, s.response ORDER BY cf.percentage)   AS rn,
+            COUNT(*)     OVER (PARTITION BY cf.population, s.response)                          AS n
+        FROM cell_frequencies cf
+        JOIN samples s    ON s.sample_id    = cf.sample_id
+        JOIN subjects sub ON sub.subject_id = s.subject_id
+        WHERE sub.condition = ? AND s.treatment = ? AND s.sample_type = ?
+          AND s.response IN ('yes','no')
+    ),
+    quartiles AS (
+        -- Linear-interpolation quartiles using the two rows bracketing each percentile index
+        SELECT population, response,
+            AVG(CASE WHEN rn IN (MAX(1, CAST(n*0.25 AS INT)),
+                                 MIN(n, CAST(n*0.25 AS INT)+1)) THEN pct END) AS q1,
+            AVG(CASE WHEN rn IN (MAX(1, CAST(n*0.50 AS INT)),
+                                 MIN(n, CAST(n*0.50 AS INT)+1)) THEN pct END) AS median,
+            AVG(CASE WHEN rn IN (MAX(1, CAST(n*0.75 AS INT)),
+                                 MIN(n, CAST(n*0.75 AS INT)+1)) THEN pct END) AS q3
+        FROM base
+        GROUP BY population, response
+    ),
+    fences AS (
+        SELECT *,
+            q1 - 1.5 * (q3 - q1) AS fence_low,
+            q3 + 1.5 * (q3 - q1) AS fence_high
+        FROM quartiles
+    ),
+    whiskers AS (
+        -- Whisker endpoints are the most extreme real data points inside the fences
+        SELECT f.population, f.response,
+               ROUND(f.q1,4) AS q1, ROUND(f.median,4) AS median, ROUND(f.q3,4) AS q3,
+               ROUND(MIN(CASE WHEN b.pct >= f.fence_low  THEN b.pct END), 4) AS whisker_low,
+               ROUND(MAX(CASE WHEN b.pct <= f.fence_high THEN b.pct END), 4) AS whisker_high,
+               f.fence_low, f.fence_high
+        FROM fences f
+        JOIN base b ON b.population = f.population AND b.response = f.response
+        GROUP BY f.population, f.response
+    )
+    -- Final: summary row per (population, response) + outlier list via GROUP_CONCAT
+    SELECT w.population, w.response,
+           w.q1, w.median, w.q3, w.whisker_low, w.whisker_high,
+           GROUP_CONCAT(
+               CASE WHEN b.pct < w.whisker_low OR b.pct > w.whisker_high THEN b.pct END,
+               ','
+           ) AS outliers_csv
+    FROM whiskers w
+    JOIN base b ON b.population = w.population AND b.response = w.response
+    GROUP BY w.population, w.response
+    ORDER BY w.population, w.response
+    """
+    df = pd.read_sql_query(query, conn, params=(condition, treatment, sample_type))
+
+    result = {}
+    for _, row in df.iterrows():
+        pop, resp = row["population"], row["response"]
+        outliers = (
+            [float(v) for v in str(row["outliers_csv"]).split(",")]
+            if row["outliers_csv"] else []
+        )
+        result.setdefault(pop, {})[resp] = {
+            "q1":           round(float(row["q1"]),          4),
+            "median":       round(float(row["median"]),       4),
+            "q3":           round(float(row["q3"]),           4),
+            "whisker_low":  round(float(row["whisker_low"]),  4),
+            "whisker_high": round(float(row["whisker_high"]), 4),
+            "outliers":     outliers,
+        }
+    return result
+
+
+@app.route("/api/statistical-analysis")
+def api_statistical_analysis():
     condition   = request.args.get("condition",   "melanoma")
     treatment   = request.args.get("treatment",   "miraclib")
     sample_type = request.args.get("sample_type", "PBMC")
@@ -179,6 +258,7 @@ def api_part3():
         conn = get_connection()
         try:
             melanoma_df = load_melanoma_miraclib_pbmc(conn, condition, treatment, sample_type)
+            boxplot     = _boxplot_from_sql(conn, condition, treatment, sample_type)
         except sqlite3.DatabaseError as e:
             log.error("Part 3 query failed: %s", e)
             return jsonify({"error": str(e)}), 500
@@ -211,14 +291,6 @@ def api_part3():
         for _, row in stats_df.iterrows()
     ]
 
-    boxplot = {
-        pop: {
-            "yes": [round(v, 4) for v in melanoma_df.loc[melanoma_df.response == "yes", f"{pop}_pct"].tolist()],
-            "no":  [round(v, 4) for v in melanoma_df.loc[melanoma_df.response == "no",  f"{pop}_pct"].tolist()],
-        }
-        for pop in POPULATIONS
-    }
-
     log.info("Part 3: %s / %s / %s → %d samples", condition, treatment, sample_type, len(melanoma_df))
     return jsonify({"stats": stats_list, "boxplot": boxplot, "filters": {"condition": condition, "treatment": treatment, "sample_type": sample_type}})
 
@@ -227,8 +299,8 @@ def api_part3():
 # API – Part 4 filter options
 # ---------------------------------------------------------------------------
 
-@app.route("/api/part4/opts")
-def api_part4_opts():
+@app.route("/api/data-subset-analysis/opts")
+def api_data_subset_analysis_opts():
     queries = {
         "conditions":   "SELECT DISTINCT condition FROM subjects ORDER BY condition",
         "sample_types": "SELECT DISTINCT sample_type FROM samples ORDER BY sample_type",
@@ -258,8 +330,8 @@ def api_part4_opts():
 # API – Part 4
 # ---------------------------------------------------------------------------
 
-@app.route("/api/part4")
-def api_part4():
+@app.route("/api/data-subset-analysis")
+def api_data_subset_analysis():
     condition   = request.args.get("condition",   "melanoma")
     sample_type = request.args.get("sample_type", "PBMC")
     time        = request.args.get("time",        "0")

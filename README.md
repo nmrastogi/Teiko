@@ -2,6 +2,8 @@
 
 A Python pipeline and interactive dashboard for analysing how the drug candidate **miraclib** affects immune cell populations across patient samples from a Loblaw Bio clinical trial.
 
+**Chatbot interface:** [https://teikochat.streamlit.app/](https://teikochat.streamlit.app/) — a natural-language chatbot that queries `teiko.db` directly, letting you ask questions about the trial data in plain English.
+
 ---
 
 ## Quick Start (GitHub Codespaces)
@@ -282,4 +284,6 @@ The `cell_counts` table has no `CHECK` constraint preventing negative counts, an
 
 ## Dashboard
 
-Run `make dashboard` and open **http://localhost:8080** in your browser. The Flask server queries `teiko.db` directly at request time — no pre-generated JSON files are required.
+**Chatbot interface:** [https://teikochat.streamlit.app/](https://teikochat.streamlit.app/) — a natural-language chatbot that queries `teiko.db` directly, letting you ask questions about the trial data in plain English.
+
+**Local dashboard:** run `make dashboard` and open **http://localhost:8080**. The Flask server queries `teiko.db` directly at request time — no pre-generated JSON files are required.

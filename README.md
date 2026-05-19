@@ -148,7 +148,7 @@ Procedural script organised into clearly named functions, one per analytical out
 - **`load_melanoma_miraclib_pbmc`** – applies explicit SQL filters; returns a DataFrame with pre-computed `*_pct` columns ready for statistical testing.
 - **`run_statistics`** – Mann-Whitney U test (non-parametric, no normality assumption) for each of the five populations; significance determined at α = 0.05 on raw p-values (Part 3).
 - **`plot_boxplots`** – matplotlib figure with one panel per population; annotations show the raw p-value and significance stars.
-- **`run_part4`** – SQL join query for the baseline subset; aggregations are handled in pandas for clarity (Part 4).
+- **`run_part4`** – SQL join query filtering to melanoma patients at time=0 (all treatments and sample types); aggregates sample counts, response/sex breakdowns, and the average B-cell count for male responders (Part 4).
 
 ### `server.py` (Flask API)
 Flask application that serves the D3.js dashboard and exposes parameterised API endpoints, each querying `teiko.db` directly at request time — no pre-generated JSON files required.

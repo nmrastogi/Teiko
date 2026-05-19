@@ -501,8 +501,31 @@ def api_data_subset_analysis():
             "subjects_by_sex": {}, "avg_b_cell_male_resp": None, "n_male_resp": 0,
         })
 
-    male_resp = df[(df["sex"] == "M") & (df["response"] == "yes")]
-    avg_b = round(float(male_resp["b_cell"].mean()), 2) if not male_resp.empty else None
+    # Avg B-cell: condition + sex=M + response=yes + time only.
+    # Excludes sample_type and treatment so the answer matches the literal question:
+    # "average B-cell for [condition] male responders at time=X"
+    avg_where, avg_params = ["sub.sex = 'M'", "s.response = 'yes'"], []
+    if condition:   avg_where.append("sub.condition = ?");                   avg_params.append(condition)
+    if time_int is not None: avg_where.append("s.time_from_treatment_start = ?"); avg_params.append(time_int)
+
+    avg_query = f"""
+        SELECT ROUND(AVG(cc.b_cell), 2) AS avg_b_cell, COUNT(*) AS n
+        FROM samples s
+        JOIN subjects sub ON sub.subject_id = s.subject_id
+        JOIN cell_counts cc ON cc.sample_id = s.sample_id
+        WHERE {" AND ".join(avg_where)}
+    """
+    try:
+        conn2 = get_connection()
+        try:
+            avg_row = pd.read_sql_query(avg_query, conn2, params=avg_params if avg_params else None).iloc[0]
+        finally:
+            conn2.close()
+    except sqlite3.OperationalError:
+        avg_row = {"avg_b_cell": None, "n": 0}
+
+    avg_b    = round(float(avg_row["avg_b_cell"]), 2) if avg_row["avg_b_cell"] is not None else None
+    n_male_resp = int(avg_row["n"])
 
     result = {
         "total_samples":        int(len(df)),
@@ -511,7 +534,7 @@ def api_data_subset_analysis():
         "subjects_by_response": {k: int(v) for k, v in df.groupby("response")["subject_id"].nunique().items()},
         "subjects_by_sex":      {k: int(v) for k, v in df.groupby("sex")["subject_id"].nunique().items()},
         "avg_b_cell_male_resp": avg_b,
-        "n_male_resp":          int(len(male_resp)),
+        "n_male_resp":          n_male_resp,
         "filters":              {"condition": condition or None, "sample_type": sample_type or None, "time": time_int, "treatment": treatment or None},
     }
 

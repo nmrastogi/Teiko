@@ -452,21 +452,21 @@ def api_data_subset_analysis():
             "filters":              { condition, sample_type, time, treatment }
         }
     """
-    condition   = request.args.get("condition",   "melanoma")
-    sample_type = request.args.get("sample_type", "PBMC")
-    time        = request.args.get("time",        "0")
-    treatment   = request.args.get("treatment",   "miraclib")
+    condition   = request.args.get("condition",   "")
+    sample_type = request.args.get("sample_type", "")
+    time        = request.args.get("time",        "")
+    treatment   = request.args.get("treatment",   "")
 
     try:
-        time_int = int(time)
+        time_int = int(time) if time else None
     except ValueError:
         return jsonify({"error": f"Invalid time value: {time}"}), 400
 
-    where_clauses = ["sub.condition = ?", "s.sample_type = ?", "s.time_from_treatment_start = ?"]
-    params = [condition, sample_type, time_int]
-    if treatment:
-        where_clauses.append("s.treatment = ?")
-        params.append(treatment)
+    where_clauses, params = [], []
+    if condition:   where_clauses.append("sub.condition = ?");                   params.append(condition)
+    if sample_type: where_clauses.append("s.sample_type = ?");                   params.append(sample_type)
+    if time_int is not None: where_clauses.append("s.time_from_treatment_start = ?"); params.append(time_int)
+    if treatment:   where_clauses.append("s.treatment = ?");                     params.append(treatment)
 
     query = f"""
         SELECT
@@ -479,7 +479,7 @@ def api_data_subset_analysis():
         FROM samples s
         JOIN subjects sub ON sub.subject_id = s.subject_id
         JOIN cell_counts cc ON cc.sample_id = s.sample_id
-        WHERE {" AND ".join(where_clauses)}
+        {"WHERE " + " AND ".join(where_clauses) if where_clauses else ""}
     """
     try:
         conn = get_connection()
@@ -512,7 +512,7 @@ def api_data_subset_analysis():
         "subjects_by_sex":      {k: int(v) for k, v in df.groupby("sex")["subject_id"].nunique().items()},
         "avg_b_cell_male_resp": avg_b,
         "n_male_resp":          int(len(male_resp)),
-        "filters":              {"condition": condition, "sample_type": sample_type, "time": time_int, "treatment": treatment},
+        "filters":              {"condition": condition or None, "sample_type": sample_type or None, "time": time_int, "treatment": treatment or None},
     }
 
     log.info("Part 4: %s / %s / t=%s / %s → %d samples", condition, sample_type, time, treatment or "all", result["total_samples"])

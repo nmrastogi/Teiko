@@ -382,7 +382,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 Promise.all([
   d3.json("/api/initial-analysis/opts"),
   d3.json("/api/statistical-analysis"),
-  d3.json("/api/data-subset-analysis"),
+  d3.json("/api/data-subset-analysis"),   // no params → all data
   d3.json("/api/data-subset-analysis/opts"),
 ]).then(([p2opts, p3raw, p4raw, p4opts]) => {
   document.getElementById("loading").style.display = "none";
@@ -799,13 +799,7 @@ function initTab4(opts, initialData) {
   populateSel("t4-f-time",       opts.times,        v => `Day ${v}`);
   populateSel("t4-f-treatment",  opts.treatments,   null);
 
-  // Set defaults to match initial data
-  document.getElementById("t4-f-condition").value  = "melanoma";
-  document.getElementById("t4-f-sampletype").value = "PBMC";
-  document.getElementById("t4-f-time").value       = "0";
-  document.getElementById("t4-f-treatment").value  = "miraclib";
-
-  // Render with initial data (no extra fetch needed)
+  // Render with initial data (all filters set to "All")
   renderTab4(initialData);
 
   // Re-fetch on filter change

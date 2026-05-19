@@ -169,6 +169,19 @@ Single-file dashboard with three tabs, loaded from CDN — no build step require
 - **Part 3** – three filter dropdowns (condition, treatment, sample type); changing any dropdown re-fetches `/api/part3?…`. The server returns pre-computed boxplot statistics (Q1, median, Q3, whisker bounds, outlier points) computed entirely in SQL — the browser only draws the SVG shapes.
 - **Part 4** – four dropdowns (condition, sample type, time point, treatment) trigger a live re-fetch of `/api/part4?…`; results update a donut chart (samples per project), two bar charts (subjects by response and by sex), and a highlighted avg B-cell metric.
 
+### Boxplot whiskers — valid data range
+
+Each boxplot follows the **Tukey fence** convention:
+
+- **Box** spans Q1 to Q3 (the interquartile range, IQR).
+- **Median line** marks the 50th percentile inside the box.
+- **Whiskers** extend from the box to the most extreme data point that still falls within **1.5 × IQR** of the box edges:
+  - Lower whisker = smallest value ≥ Q1 − 1.5 × IQR
+  - Upper whisker = largest value ≤ Q3 + 1.5 × IQR
+- **Dots beyond the whiskers** are individual outliers — observations outside the valid range defined by the fences.
+
+The whiskers therefore represent the **valid range of typical data**. Any point outside them is unusually high or low relative to the bulk of the distribution and is plotted individually. Quartiles, whisker bounds, and outlier values are all computed server-side in SQL before being sent to the browser.
+
 ### Statistical Methodology (Part 3)
 
 **Significance threshold:** α = 0.05 applied directly to raw p-values.

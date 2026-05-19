@@ -47,15 +47,32 @@ POP_LABELS = {
 
 @app.route("/")
 def index():
+    """Serve the single-page D3.js dashboard."""
     return send_file("index.html")
 
 
 # ---------------------------------------------------------------------------
-# API – Part 2 filter options
+# API – Initial Analysis filter options
 # ---------------------------------------------------------------------------
 
 @app.route("/api/initial-analysis/opts")
 def api_initial_analysis_opts():
+    """
+    Return the distinct values for every Initial Analysis filter dropdown.
+
+    Queried fresh from the database so the options always reflect what is
+    actually present in teiko.db — no hard-coded lists.
+
+    Response shape:
+        {
+            "conditions":   [...],   # e.g. ["carcinoma", "healthy", "melanoma"]
+            "treatments":   [...],   # e.g. ["miraclib", "none", "phauximab"]
+            "sample_types": [...],   # e.g. ["PBMC", "WB"]
+            "times":        [...],   # e.g. [0, 7, 14]
+            "responses":    [...],   # e.g. ["no", "yes"]
+            "sexes":        [...]    # e.g. ["F", "M"]
+        }
+    """
     queries = {
         "conditions":   "SELECT DISTINCT condition FROM subjects ORDER BY condition",
         "treatments":   "SELECT DISTINCT treatment FROM samples ORDER BY treatment",
@@ -84,11 +101,34 @@ def api_initial_analysis_opts():
 
 
 # ---------------------------------------------------------------------------
-# API – Part 2
+# API – Initial Analysis
 # ---------------------------------------------------------------------------
 
 @app.route("/api/initial-analysis")
 def api_initial_analysis():
+    """
+    Return relative cell-population frequencies for the requested subset.
+
+    All parameters are optional; omitting a parameter removes that filter so
+    all values for that dimension are included.
+
+    Query parameters:
+        condition   – patient condition   (e.g. melanoma, carcinoma, healthy)
+        treatment   – drug administered   (e.g. miraclib, phauximab, none)
+        sample_type – sample material     (PBMC or WB)
+        time        – days from treatment start (0, 7, or 14)
+        response    – treatment response  (yes or no)
+        sex         – patient sex         (M or F)
+        population  – cell population     (b_cell, cd8_t_cell, …)
+
+    Response shape:
+        {
+            "rows":  [ { sample, project, condition, sex, treatment, response,
+                         sample_type, time, total_count,
+                         population, count, percentage }, … ],
+            "total": <int>   # total number of rows returned
+        }
+    """
     condition   = request.args.get("condition",   "")
     treatment   = request.args.get("treatment",   "")
     sample_type = request.args.get("sample_type", "")
@@ -167,11 +207,28 @@ def api_initial_analysis():
 
 
 # ---------------------------------------------------------------------------
-# API – Part 3
+# API – Statistical Analysis
 # ---------------------------------------------------------------------------
 
 def _boxplot_from_sql(conn, condition, treatment, sample_type):
-    """Compute quartiles, whiskers and outliers entirely in SQL using CTEs."""
+    """
+    Compute boxplot statistics for all five cell populations entirely in SQL.
+
+    Uses a four-step CTE chain so no data leaves the database engine until
+    the final summary row per (population, response) group is ready:
+
+      base      – ranks every percentage value within (population, response)
+                  using ROW_NUMBER(); also counts rows per group.
+      quartiles – picks the two rows bracketing the 25th / 50th / 75th
+                  percentile index and averages them (linear interpolation).
+      fences    – derives the Tukey fence bounds: Q1 − 1.5×IQR, Q3 + 1.5×IQR.
+      whiskers  – clamps the fence to the nearest real data point on each side.
+      final     – aggregates outlier values (points outside the whiskers) into
+                  a comma-separated string via GROUP_CONCAT.
+
+    Returns a nested dict keyed by population → response group ("yes"/"no"),
+    each containing q1, median, q3, whisker_low, whisker_high, outliers.
+    """
     query = """
     WITH base AS (
         -- Rank each percentage value within (population, response)
@@ -250,6 +307,29 @@ def _boxplot_from_sql(conn, condition, treatment, sample_type):
 
 @app.route("/api/statistical-analysis")
 def api_statistical_analysis():
+    """
+    Run Mann-Whitney U tests comparing responders vs non-responders for each
+    cell population in the selected subset, and return pre-computed boxplot
+    statistics for the dashboard.
+
+    Query parameters (all optional, defaults shown):
+        condition   – patient condition  (default: melanoma)
+        treatment   – drug administered  (default: miraclib)
+        sample_type – sample material    (default: PBMC)
+
+    Returns 404 if no samples match, 422 if only one response group is present
+    (a two-group comparison requires both responders and non-responders).
+
+    Response shape:
+        {
+            "stats":   [ { population, label, n_responders, n_non_responders,
+                           median_resp, median_nonresp, p_value, significant }, … ],
+            "boxplot": { "<population>": { "yes": { q1, median, q3,
+                                                    whisker_low, whisker_high,
+                                                    outliers }, "no": {…} } },
+            "filters": { condition, treatment, sample_type }
+        }
+    """
     condition   = request.args.get("condition",   "melanoma")
     treatment   = request.args.get("treatment",   "miraclib")
     sample_type = request.args.get("sample_type", "PBMC")
@@ -296,11 +376,22 @@ def api_statistical_analysis():
 
 
 # ---------------------------------------------------------------------------
-# API – Part 4 filter options
+# API – Data Subset Analysis filter options
 # ---------------------------------------------------------------------------
 
 @app.route("/api/data-subset-analysis/opts")
 def api_data_subset_analysis_opts():
+    """
+    Return the distinct values for every Data Subset Analysis filter dropdown.
+
+    Response shape:
+        {
+            "conditions":   [...],
+            "sample_types": [...],
+            "times":        [...],
+            "treatments":   [...]
+        }
+    """
     queries = {
         "conditions":   "SELECT DISTINCT condition FROM subjects ORDER BY condition",
         "sample_types": "SELECT DISTINCT sample_type FROM samples ORDER BY sample_type",
@@ -327,11 +418,40 @@ def api_data_subset_analysis_opts():
 
 
 # ---------------------------------------------------------------------------
-# API – Part 4
+# API – Data Subset Analysis
 # ---------------------------------------------------------------------------
 
 @app.route("/api/data-subset-analysis")
 def api_data_subset_analysis():
+    """
+    Return aggregated statistics for a filtered patient subset.
+
+    Designed to answer exploratory questions such as how many samples came
+    from each project, how subjects split by response and sex, and what the
+    average B-cell count is for male responders.
+
+    Query parameters (all optional, defaults shown):
+        condition   – patient condition       (default: melanoma)
+        sample_type – sample material         (default: PBMC)
+        time        – days from treatment start (default: 0)
+        treatment   – drug administered       (default: miraclib)
+                      pass an empty string to include all treatments.
+
+    Returns an empty-result payload (zeros / empty dicts) when no samples
+    match rather than raising an error, so the dashboard degrades gracefully.
+
+    Response shape:
+        {
+            "total_samples":        <int>,
+            "total_subjects":       <int>,
+            "samples_per_project":  { "<project_id>": <int>, … },
+            "subjects_by_response": { "yes": <int>, "no": <int> },
+            "subjects_by_sex":      { "M": <int>, "F": <int> },
+            "avg_b_cell_male_resp": <float|null>,  # null if no male responders
+            "n_male_resp":          <int>,
+            "filters":              { condition, sample_type, time, treatment }
+        }
+    """
     condition   = request.args.get("condition",   "melanoma")
     sample_type = request.args.get("sample_type", "PBMC")
     time        = request.args.get("time",        "0")

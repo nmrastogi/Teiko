@@ -215,6 +215,7 @@ def run_part4(conn: sqlite3.Connection) -> str:
     """Query and summarise the melanoma / miraclib / PBMC / baseline subset."""
 
     # Base subset: melanoma PBMC at time=0 treated with miraclib
+    # Base subset: melanoma, PBMC, time=0 (all treatments)
     base_query = """
         SELECT
             s.sample_id,
@@ -231,9 +232,7 @@ def run_part4(conn: sqlite3.Connection) -> str:
         JOIN subjects sub ON sub.subject_id = s.subject_id
         JOIN cell_counts cc ON cc.sample_id = s.sample_id
         WHERE sub.condition               = 'melanoma'
-          AND s.sample_type               = 'PBMC'
           AND s.time_from_treatment_start = 0
-          AND s.treatment                 = 'miraclib'
         ORDER BY s.sample_id
     """
     try:
@@ -248,20 +247,20 @@ def run_part4(conn: sqlite3.Connection) -> str:
     # Samples per project
     samples_per_project = df.groupby("project_id").size().to_dict()
 
-    # Subjects per response category (each subject appears once at baseline)
+    # Subjects per response category
     response_counts = df.groupby("response")["subject_id"].nunique().to_dict()
 
     # Subjects per sex
     sex_counts = df.groupby("sex")["subject_id"].nunique().to_dict()
 
-    # Average B cells: melanoma males, responders, time=0
+    # Average B cells: melanoma males, responders, time=0 (no treatment/sample_type filter)
     male_resp = df[(df["sex"] == "M") & (df["response"] == "yes")]
     avg_b_cell_male_responders = male_resp["b_cell"].mean()
 
     lines = [
         "=" * 60,
         "PART 4 – BASELINE SUBSET ANALYSIS",
-        "Filter: melanoma · PBMC · time_from_treatment_start = 0 · miraclib",
+        "Filter: melanoma · time_from_treatment_start = 0",
         "=" * 60,
         "",
         f"Total samples in subset : {total_samples}",

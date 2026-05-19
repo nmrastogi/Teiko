@@ -1,25 +1,26 @@
 ============================================================
 PART 4 – BASELINE SUBSET ANALYSIS
-Filter: melanoma · PBMC · time_from_treatment_start = 0 · miraclib
+Filter: melanoma · time_from_treatment_start = 0
 ============================================================
 
-Total samples in subset : 656
-Total unique subjects   : 656
+Total samples in subset : 1725
+Total unique subjects   : 1725
 
 Samples per project:
-  prj1: 384
-  prj3: 272
+  prj1: 738
+  prj2: 478
+  prj3: 509
 
 Subjects by response status:
-  no: 325
-  yes: 331
+  no: 846
+  yes: 879
 
 Subjects by sex:
-  F: 312
-  M: 344
+  F: 816
+  M: 909
 
 ------------------------------------------------------------
 Average B-cell count for melanoma MALE RESPONDERS at time=0:
-  10401.28
-  (n=184)
+  10206.15
+  (n=485)
 ------------------------------------------------------------

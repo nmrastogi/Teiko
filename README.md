@@ -2,7 +2,7 @@
 
 Analysis pipeline and interactive dashboard for how **miraclib** affects immune cell populations across Loblaw Bio clinical trial samples.
 
-**Chatbot:** [https://teikochat.streamlit.app/](https://teikochat.streamlit.app/) — ask questions about the trial data in plain English.
+**Chatbot:** [https://teikochat.streamlit.app/](https://teikochat.streamlit.app/) — a natural-language interface that queries `teiko.db` directly. Ask questions such as *"How many melanoma patients responded to miraclib?"* or *"What is the average B-cell count for male responders at time 0?"* and receive answers drawn live from the database. No SQL knowledge required.
 
 ---
 
@@ -127,4 +127,4 @@ make test   # or: pytest tests/test_data.py -v
 ## Dashboard
 
 **Local:** `make dashboard` → [http://localhost:8080](http://localhost:8080)
-**Chatbot:** [https://teikochat.streamlit.app/](https://teikochat.streamlit.app/)
+**Chatbot (natural language):** [https://teikochat.streamlit.app/](https://teikochat.streamlit.app/)

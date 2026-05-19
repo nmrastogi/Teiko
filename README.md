@@ -121,6 +121,7 @@ make test   # or: pytest tests/test_data.py -v
 | **Row updates** | `INSERT OR IGNORE` silently drops corrections | Upsert with `ON CONFLICT … DO UPDATE` |
 | **Statistics** | Two-group Mann-Whitney U only | Mixed-effects models for longitudinal/multi-group analysis |
 | **Schema** | No CHECK constraints on cell counts or controlled vocabularies | Add constraints to DDL |
+| **Package management** | `pip` + `requirements.txt` — no dependency locking or reproducible environments | Switch to **uv**: faster installs, automatic lockfile (`uv.lock`), and isolated virtual environments by default; drop-in replacement for `pip install -r requirements.txt` |
 
 ---
 
